@@ -432,12 +432,19 @@ async function loadBirdAlliances(){
   }
 }
 async function loadBirds(){
-  const btn=$("birdsRefresh"),label=btn.textContent;btn.disabled=true;btn.textContent="Pobieranie…";
+  const btn=$("birdsRefresh"),label=btn.textContent;btn.disabled=true;btn.textContent="Skan w tle…";
   if($("birdsAlliance").options.length<=1) await loadBirdAlliances();
-  $("birdsResult").innerHTML='<div class="notice">Pobieram ochrony Dove. Możesz wybrać cały serwer, sojusz albo konkretnego gracza.</div>';
+  $("birdsResult").innerHTML='<div class="notice">Uruchamiam pobieranie ochron Dove w tle. Strona pozostaje responsywna; wyniki pojawią się automatycznie po zakończeniu skanu.</div>';
   try{
     const params=new URLSearchParams({server:$("server").value,alliance:$("birdsAlliance").value,player:$("birdsPlayer").value.trim()});
-    const data=await api("/api/bot/doves?"+params.toString());populateBirdAlliances(data.alliances||[]);birdsRows=data.items||[];window.birdsScanned=data.scanned_players||0;renderBirds();
+    let data=null;
+    for(let attempt=0;attempt<120;attempt++){
+      data=await api("/api/bot/doves?"+params.toString());
+      if(data.ready){populateBirdAlliances(data.alliances||[]);birdsRows=data.items||[];window.birdsScanned=data.scanned_players||0;renderBirds();return;}
+      $("birdsResult").innerHTML='<div class="notice">Skan ochron Dove trwa w tle. Nie musisz trzymać strony zablokowanej — sprawdzam postęp i wyświetlę wyniki automatycznie.</div>';
+      await new Promise(resolve=>setTimeout(resolve,5000));
+    }
+    $("birdsResult").innerHTML='<div class="notice warn">Skan nadal trwa. Możesz wrócić później — po zakończeniu wyniki będą dostępne z pamięci podręcznej.</div>';
   }catch(err){$("birdsResult").innerHTML='<div class="notice warn">'+esc(err.message)+'</div>';}
   finally{btn.disabled=false;btn.textContent=label;}
 }
