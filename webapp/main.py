@@ -471,6 +471,137 @@ async def bot_radar_movements(
     raise HTTPException(502, f"API radaru nie udostępniło danych (ostatni kod: {last_status}).")
 
 
+
+# Read-only calendar port from the GGE Assistant bot. No Discord alerts or guild settings.
+from html.parser import HTMLParser
+
+CALENDAR_SOURCE_URL = "https://communityhub.goodgamestudios.com/newshube4k"
+CALENDAR_EVENTS = {
+    "samurai invasion": {"name":"Samuraje","start":"11:00","end":"09:00"},
+    "nomad invasion": {"name":"Nomadzi","start":"11:00","end":"09:00"},
+    "bloodcrow invasion": {"name":"Kruki krwi","start":"11:00","end":"09:00"},
+    "war of the realms": {"name":"Wojna królestw","start":"11:00","end":"09:00"},
+    "berimond": {"name":"Berimond","start":"11:00","end":"08:30"},
+    "bladecoast": {"name":"Côte Tranchante","start":"11:00","end":"09:00"},
+    "rift raid": {"name":"Raid Szczeliny","start":"11:00","end":"09:00"},
+    "grand tournament": {"name":"Wielki Turniej","start":"11:00","end":"12:00"},
+    "beyond the horizon": {"name":"Poza horyzontem","start":"11:00","end":"00:40"},
+    "outer realms": {"name":"Zewnętrzne krainy","start":"11:00","end":"00:40"},
+    "imperial patronage": {"name":"Cesarski patronat","start":"11:00","end":"09:30"},
+    "grand nobility contest": {"name":"Wielki konkurs szlachectwa","start":"11:00","end":"09:00"},
+}
+CALENDAR_ALLIANCE_KEYS = {"grand tournament", "rift raid", "beyond the horizon"}
+CALENDAR_CACHE = {"at": 0.0, "events": [], "last_error": None}
+CALENDAR_LOCK = asyncio.Lock()
+
+class _CalendarTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.skip_depth = 0
+    def handle_starttag(self, tag, attrs):
+        if tag.lower() in ("script", "style", "noscript"):
+            self.skip_depth += 1
+    def handle_endtag(self, tag):
+        if tag.lower() in ("script", "style", "noscript") and self.skip_depth:
+            self.skip_depth -= 1
+    def handle_data(self, data):
+        if not self.skip_depth and data.strip():
+            self.parts.append(data.strip())
+
+def _parse_calendar_html(html_text: str):
+    parser = _CalendarTextParser()
+    parser.feed(html_text)
+    now = datetime.now(timezone.utc)
+    found, seen = [], set()
+    current_key = None
+    date_pattern = re.compile(r"(\\d{2}[/.-]\\d{2})[/.-]?\\s*(?:-|à|to|au|–|—)\\s*(\\d{2}[/.-]\\d{2})", re.I)
+    for part in parser.parts:
+        lower = part.casefold()
+        matched = next((key for key in CALENDAR_EVENTS if key in lower), None)
+        if matched:
+            current_key = matched
+        if not current_key:
+            continue
+        for start_s, end_s in date_pattern.findall(lower):
+            try:
+                start_s = start_s.replace(".", "/").replace("-", "/")
+                end_s = end_s.replace(".", "/").replace("-", "/")
+                meta = CALENDAR_EVENTS[current_key]
+                start_dt = datetime.strptime(f"{start_s}/{now.year} {meta['start']}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
+                end_dt = datetime.strptime(f"{end_s}/{now.year} {meta['end']}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
+                if start_dt < now - __import__("datetime").timedelta(days=180):
+                    start_dt = start_dt.replace(year=start_dt.year + 1)
+                    end_dt = end_dt.replace(year=end_dt.year + 1)
+                if end_dt < start_dt:
+                    end_dt = end_dt.replace(year=end_dt.year + 1)
+                uid = f"{current_key}_{int(start_dt.timestamp())}"
+                if uid not in seen:
+                    found.append({"id": hashlib.sha1(uid.encode()).hexdigest()[:8],
+                                  "key": current_key, "name": meta["name"],
+                                  "start": start_dt.isoformat(), "end": end_dt.isoformat()})
+                    seen.add(uid)
+            except (ValueError, OverflowError):
+                continue
+    return sorted(found, key=lambda event: event["start"])
+
+async def _get_live_calendar(force: bool = False):
+    now_ts = time.time()
+    if not force and CALENDAR_CACHE["at"] and now_ts - CALENDAR_CACHE["at"] < 600:
+        return CALENDAR_CACHE["events"]
+    async with CALENDAR_LOCK:
+        now_ts = time.time()
+        if not force and CALENDAR_CACHE["at"] and now_ts - CALENDAR_CACHE["at"] < 600:
+            return CALENDAR_CACHE["events"]
+        try:
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+                response = await client.get(CALENDAR_SOURCE_URL, headers={
+                    "User-Agent":"Mozilla/5.0 (compatible; Empiremaps-Web/1.0)",
+                    "Accept":"text/html,application/xhtml+xml"
+                })
+            if response.status_code != 200:
+                CALENDAR_CACHE["last_error"] = f"Community Hub zwrócił HTTP {response.status_code}."
+                if CALENDAR_CACHE["events"]:
+                    return CALENDAR_CACHE["events"]
+                raise HTTPException(502, CALENDAR_CACHE["last_error"])
+            events = _parse_calendar_html(response.text)
+            if not events:
+                CALENDAR_CACHE["last_error"] = "Strona źródłowa nie zwróciła rozpoznawalnych wydarzeń. Parser wymaga aktualizacji."
+                if CALENDAR_CACHE["events"]:
+                    return CALENDAR_CACHE["events"]
+            else:
+                CALENDAR_CACHE.update({"events": events, "at": time.time(), "last_error": None})
+            return CALENDAR_CACHE["events"]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            CALENDAR_CACHE["last_error"] = str(exc)[:200]
+            if CALENDAR_CACHE["events"]:
+                return CALENDAR_CACHE["events"]
+            raise HTTPException(502, "Nie udało się pobrać kalendarza z Community Hub.")
+
+@app.get("/api/bot/calendar")
+async def bot_calendar(view: str = "main", refresh: bool = False, user: User = Depends(current_user)):
+    if view not in ("main", "future", "alliance"):
+        raise HTTPException(400, "Nieprawidłowy widok kalendarza.")
+    events = await _get_live_calendar(force=refresh)
+    now = datetime.now(timezone.utc)
+    visible = []
+    for event in events:
+        start_dt = datetime.fromisoformat(event["start"])
+        end_dt = datetime.fromisoformat(event["end"])
+        if end_dt < now:
+            continue
+        if view == "future" and not (start_dt > now and start_dt - now <= __import__("datetime").timedelta(days=7)):
+            continue
+        if view == "alliance" and event["key"] not in CALENDAR_ALLIANCE_KEYS:
+            continue
+        visible.append(event)
+    return {"view": view, "events": visible, "total": len(visible),
+            "updated_at": datetime.fromtimestamp(CALENDAR_CACHE["at"], timezone.utc).isoformat() if CALENDAR_CACHE["at"] else None,
+            "source": CALENDAR_SOURCE_URL, "warning": CALENDAR_CACHE["last_error"]}
+
+
 @app.get("/api/features")
 def features(user: User = Depends(current_user)):
     return {
