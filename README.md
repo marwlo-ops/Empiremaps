@@ -105,6 +105,7 @@
 │   ├── main.py
 │   └── requirements.txt
 ├── Dockerfile
+├── Dockerfile.bot
 ├── LICENSE
 ├── README.md
 ├── SECURITY.md
@@ -116,7 +117,7 @@
 ├── ruff.toml
 └── utils.py
 
-13 directories, 58 files
+13 directories, 59 files
 ```
 <!-- TREE-END -->
 *(This section is auto-updated via GitHub Actions)*
