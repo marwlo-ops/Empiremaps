@@ -60,13 +60,16 @@
 │   │   ├── __init__.py
 │   │   ├── spy.py
 │   │   └── views.py
+│   ├── admin.py
 │   ├── aide.py
 │   ├── alliances.py
 │   ├── calendrier.py
 │   ├── cible.py
 │   ├── classement.py
+│   ├── config.py
 │   ├── configuration.py
 │   ├── evenements.py
+│   ├── events.py
 │   ├── faille.py
 │   ├── forteresses.py
 │   ├── gge_hub_community.py
@@ -74,8 +77,13 @@
 │   ├── iles_orageuses.py
 │   ├── joueurs.py
 │   ├── offres.py
+│   ├── profils.py
+│   ├── radar.py
 │   ├── roue_richesses.py
-│   └── scan_serveurs.py
+│   ├── scan_server.py
+│   ├── scan_serveurs.py
+│   ├── storms.py
+│   └── target.py
 ├── database
 │   └── schema.sql
 ├── locales
@@ -92,10 +100,7 @@
 │   ├── recorders.py
 │   └── runtime.py
 ├── site
-│   ├── barony.html
-│   ├── index.html
-│   ├── mapa-rb.html
-│   └── repetytorium.html
+│   └── index.html
 ├── webapp
 │   ├── main.py
 │   └── requirements.txt
@@ -111,7 +116,7 @@
 ├── ruff.toml
 └── utils.py
 
-13 directories, 53 files
+13 directories, 58 files
 ```
 <!-- TREE-END -->
 *(This section is auto-updated via GitHub Actions)*
