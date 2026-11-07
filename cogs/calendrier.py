@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 import logging
@@ -11,10 +10,9 @@ from bs4 import BeautifulSoup
 from discord import app_commands
 from discord.ext import commands, tasks
 
-import observability as obs
 from utils import (
+    CONFIG_DIR,
     DICT_EMOJIS,
-    EVENT_MAPPING,
     SERVEURS_DIR,
     TRACKER_EVENTS,
     alliance_autocomplete,
@@ -27,6 +25,7 @@ from utils import (
 logger = logging.getLogger("GGE_Bot")
 
 CALENDRIER_FILE = SERVEURS_DIR / "calendrier.json"
+MAPPING_FILE = CONFIG_DIR / "event_mapping.json"
 
 
 # ===========================================
@@ -122,17 +121,13 @@ async def load_calendrier_async():
             if "guilds" not in data:
                 return {"guilds": {}, "notified": data.get("notified", [])}
             return data
-    except Exception as e:
-        logger.error(f"❌ [Calendar] Erreur de lecture du fichier calendrier.json : {e}")
+    except:
         return {"guilds": {}, "notified": []}
 
 
 async def save_calendrier_async(data):
-    try:
-        with open(CALENDRIER_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"❌ [Calendar] Erreur d'écriture du fichier calendrier.json : {e}")
+    with open(CALENDRIER_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 class CalendrierCog(commands.GroupCog, group_name="calendar", group_description="Event calendar management"):
@@ -140,7 +135,26 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
         self.bot = bot
         self.cached_events = []
         self.last_scrape_time = None
-        self.event_mapping = EVENT_MAPPING
+        self.event_mapping = self.load_event_mapping()
+
+    def load_event_mapping(self):
+        """Charge la configuration des événements depuis le fichier JSON externe"""
+        if not MAPPING_FILE.exists():
+            logger.error(f"❌ Le fichier {MAPPING_FILE} est introuvable !")
+            return {}
+
+        try:
+            with open(MAPPING_FILE, encoding="utf-8") as f:
+                mapping = json.load(f)
+
+            for key, data in mapping.items():
+                if isinstance(data.get("color"), str) and data["color"].startswith("0x"):
+                    data["color"] = int(data["color"], 16)
+
+            return mapping
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la lecture de {MAPPING_FILE} : {e}")
+            return {}
 
     async def load_cache_from_file(self):
         data = await load_calendrier_async()
@@ -163,9 +177,10 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
                         events_actifs.append({"id": ev_id, "key": ev["key"], "start": start_dt, "end": end_dt})
                         seen_uids.add(uid)
             except Exception as e:
-                logger.error(f"❌ [Calendar] Erreur lecture date cache event : {e}")
+                logger.error(f"❌ Erreur lecture date: {e}")
 
         self.cached_events = events_actifs
+        logger.info(f"📂 [Calendrier] {len(self.cached_events)} événements chargés (doublons purgés).")
 
     async def save_cache_to_file(self):
         data = await load_calendrier_async()
@@ -192,13 +207,8 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
     @app_commands.describe(channel="The text-based event lounge")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.checks.cooldown(1, 3.0, key=lambda i: i.guild_id)
     async def c_setup(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.warning(f"❌ [Calendar] Defer failed sur /{interaction.command.name} : {e}")
-            return
+        await interaction.response.defer(ephemeral=True)
 
         langue, serveur = await get_server_config(interaction)
 
@@ -214,15 +224,6 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
         await save_calendrier_async(data)
 
-        # Enregistrement Télémétrie d'engagement
-        obs.record_guild_event(
-            "calendar_setup",
-            guild=interaction.guild,
-            user_id=interaction.user.id,
-            gge_server=serveur,
-            new_value=f"channel:{channel.id}",
-        )
-
         msg = t(
             langue,
             "cal_setup_success",
@@ -235,14 +236,9 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
     @app_commands.autocomplete(alliance_name=alliance_autocomplete)
     @app_commands.describe(alliance_name="Name of the alliance to follow")
     @app_commands.guild_only()
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.guild_id)
     async def c_track(self, interaction: discord.Interaction, alliance_name: str):
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.warning(f"❌ [Calendar] Defer failed sur /{interaction.command.name} : {e}")
-            return
-        langue, serveur = await get_server_config(interaction)
+        await interaction.response.defer(ephemeral=True)
+        langue, _ = await get_server_config(interaction)
 
         data = await load_calendrier_async()
         guild_id = str(interaction.guild_id)
@@ -262,15 +258,6 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
         tracked.append(alliance_name)
         await save_calendrier_async(data)
-
-        obs.record_guild_event(
-            "calendar_track_alliance",
-            guild=interaction.guild,
-            user_id=interaction.user.id,
-            gge_server=serveur,
-            new_value=alliance_name,
-        )
-
         msg_success = t(
             langue,
             "cal_track_success",
@@ -283,14 +270,9 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
     @app_commands.autocomplete(alliance_name=alliance_autocomplete)
     @app_commands.describe(alliance_name="Name of the alliance to be withdrawn")
     @app_commands.guild_only()
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.guild_id)
     async def c_untrack(self, interaction: discord.Interaction, alliance_name: str):
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.warning(f"❌ [Calendar] Defer failed sur /{interaction.command.name} : {e}")
-            return
-        langue, serveur = await get_server_config(interaction)
+        await interaction.response.defer(ephemeral=True)
+        langue, _ = await get_server_config(interaction)
 
         data = await load_calendrier_async()
         guild_id = str(interaction.guild_id)
@@ -327,14 +309,9 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
     @app_commands.command(name="stop", description="Disable calendar alerts and event reports for this server")
     @app_commands.guild_only()
     @app_commands.default_permissions(manage_guild=True)
-    @app_commands.checks.cooldown(1, 3.0, key=lambda i: i.guild_id)
     async def c_stop(self, interaction: discord.Interaction):
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.warning(f"❌ [Calendar] Defer failed sur /{interaction.command.name} : {e}")
-            return
-        langue, serveur = await get_server_config(interaction)
+        await interaction.response.defer(ephemeral=True)
+        langue, _ = await get_server_config(interaction)
 
         data = await load_calendrier_async()
         guild_id = str(interaction.guild_id)
@@ -342,10 +319,6 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
         if guild_id in data.get("guilds", {}) and data["guilds"][guild_id].get("channel_id") is not None:
             data["guilds"][guild_id]["channel_id"] = None
             await save_calendrier_async(data)
-
-            obs.record_guild_event(
-                "calendar_stop", guild=interaction.guild, user_id=interaction.user.id, gge_server=serveur
-            )
 
             msg = t(
                 langue,
@@ -358,13 +331,8 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
             await interaction.followup.send(msg_fail)
 
     @app_commands.command(name="current", description="Displays the complete calendar of events")
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.user.id)
     async def c_current(self, interaction: discord.Interaction):
-        try:
-            await interaction.response.defer(ephemeral=False)
-        except Exception:
-            return
-
+        await interaction.response.defer(ephemeral=False)
         langue, _ = await get_server_config(interaction)
 
         events = getattr(self, "cached_events", [])
@@ -502,7 +470,7 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
                     return []
 
                 html_content = await r.text()
-                soup = await asyncio.to_thread(BeautifulSoup, html_content, "html.parser")
+                soup = BeautifulSoup(html_content, "html.parser")
 
                 found_events = []
                 seen_signatures = set()
@@ -546,20 +514,15 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
                 return found_events
         except Exception as e:
-            logger.error(f"❌ [Calendar] Erreur BS4 : {e}")
-            obs.record_error(source="background", scope="parse_live_calendar", exception=e, cog="calendar")
+            logger.error(f"❌ [Calendrier] Erreur BS4 : {e}")
             return []
 
     @tasks.loop(minutes=1)
     async def check_newshub_calendar_task(self):
-        obs.set_task_name("check_newshub_calendar_task")
         try:
             await self._run_calendar_check()
-        except Exception as e:
-            logger.error(f"❌ [Calendar] CRASH DE LA TACHE CALENDRIER : {traceback.format_exc()}")
-            obs.record_error(
-                source="task", scope="check_newshub_calendar_task", exception=e, cog="calendar", severity="warning"
-            )
+        except Exception:
+            logger.error(f"❌ [CALENDRIER CRASH] : {traceback.format_exc()}")
 
     async def _run_calendar_check(self):
         maintenant = datetime.now()
@@ -583,7 +546,7 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
                     nev_id = nev.get("id")
 
                     if nev_id in deleted_events:
-                        logger.info(f"🚫 [Calendar] L'événement {nev['key']} ({nev_id}) a été ignoré (Liste Noire).")
+                        logger.info(f"🚫 [Calendrier] L'événement {nev['key']} ({nev_id}) a été ignoré (Liste Noire).")
                         continue
 
                     if nev_id not in ids_en_cache:
@@ -595,7 +558,7 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
             await self.save_cache_to_file()
             logger.info(
-                f"📝 [Calendar] Cache mis à jour et sauvegardé : {len(self.cached_events)} événements actifs/récents."
+                f"📝 [Calendrier] Cache mis à jour et sauvegardé : {len(self.cached_events)} événements actifs/récents."
             )
 
         events = getattr(self, "cached_events", [])
@@ -616,10 +579,8 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
             if maintenant >= ev["start"] and uid_start not in notified:
                 if ev["start"].date() == maintenant.date():
-                    logger.info(f"🔎 [Calendar] DÉCLENCHEMENT DÉBUT de {meta['name_default']}")
+                    logger.info(f"🔎 [Calendrier] DÉCLENCHEMENT DÉBUT de {meta['name_default']}")
                     ts_fin = int(ev["end"].timestamp())
-
-                    guilds_to_remove = []
 
                     for guild_id, g_info in data.get("guilds", {}).items():
                         channel_id = g_info.get("channel_id")
@@ -628,14 +589,8 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
                             if not channel:
                                 try:
                                     channel = await self.bot.fetch_channel(channel_id)
-                                except discord.NotFound:
-                                    guilds_to_remove.append(guild_id)
-                                    continue
-                                except discord.Forbidden:
-                                    guilds_to_remove.append(guild_id)
-                                    continue
-                                except Exception:
-                                    continue
+                                except:
+                                    pass
 
                             if channel:
                                 langue = g_info.get("langue", "fr")
@@ -669,57 +624,15 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
                                 try:
                                     await channel.send(embed=embed_start)
-                                    obs.record_alert(
-                                        source="calendar",
-                                        alert_type="start",
-                                        gge_server=serveur_cible,
-                                        channel="guild",
-                                        recipients=1,
-                                        delivered=1,
-                                        failed=0,
-                                        dm_blocked=0,
-                                    )
-                                except (discord.Forbidden, discord.NotFound) as e:
-                                    logger.warning(
-                                        f"⚠️ [Calendar] Permissions insuffisantes ou salon introuvable sur {guild_id} ({e}). Suppression de l'abonnement."
-                                    )
-                                    guilds_to_remove.append(guild_id)
-                                    obs.record_alert(
-                                        source="calendar",
-                                        alert_type="start",
-                                        gge_server=serveur_cible,
-                                        channel="guild",
-                                        recipients=1,
-                                        delivered=0,
-                                        failed=1,
-                                        dm_blocked=0,
-                                    )
-                                except Exception as e:
-                                    logger.error(f"❌ [Calendar] Erreur d'envoi alerte début calendrier : {e}")
-                                    obs.record_alert(
-                                        source="calendar",
-                                        alert_type="start",
-                                        gge_server=serveur_cible,
-                                        channel="guild",
-                                        recipients=1,
-                                        delivered=0,
-                                        failed=1,
-                                        dm_blocked=0,
-                                    )
-
-                    for gid in guilds_to_remove:
-                        if gid in data["guilds"]:
-                            del data["guilds"][gid]
-                            modifie = True
+                                except:
+                                    pass
 
                 notified.append(uid_start)
                 modifie = True
 
             if maintenant >= ev["end"] and uid_end not in notified:
                 if ev["end"].date() == maintenant.date():
-                    logger.info(f"🔎 [Calendar] DÉCLENCHEMENT FIN de {meta['name_default']}")
-
-                    guilds_to_remove = []
+                    logger.info(f"🔎 [Calendrier] DÉCLENCHEMENT FIN de {meta['name_default']}")
 
                     for guild_id, g_info in data.get("guilds", {}).items():
                         channel_id = g_info.get("channel_id")
@@ -728,14 +641,8 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
                             if not channel:
                                 try:
                                     channel = await self.bot.fetch_channel(channel_id)
-                                except discord.NotFound:
-                                    guilds_to_remove.append(guild_id)
-                                    continue
-                                except discord.Forbidden:
-                                    guilds_to_remove.append(guild_id)
-                                    continue
-                                except Exception:
-                                    continue
+                                except:
+                                    pass
 
                             if channel:
                                 langue = g_info.get("langue", "fr")
@@ -757,96 +664,42 @@ class CalendrierCog(commands.GroupCog, group_name="calendar", group_description=
 
                                 embed_end = discord.Embed(title=titre_end, description=desc_end, color=0x2E4045)
                                 await setup_embed_footer(embed_end, None, langue)
-
                                 try:
                                     await channel.send(embed=embed_end)
-                                    obs.record_alert(
-                                        source="calendar",
-                                        alert_type="end",
-                                        gge_server=serveur_cible,
-                                        channel="guild",
-                                        recipients=1,
-                                        delivered=1,
-                                        failed=0,
-                                        dm_blocked=0,
-                                    )
-                                except (discord.Forbidden, discord.NotFound) as e:
-                                    logger.warning(
-                                        f"⚠️ [Calendar] Permissions insuffisantes ou salon introuvable sur {guild_id} ({e}). Suppression de l'abonnement."
-                                    )
-                                    guilds_to_remove.append(guild_id)
-                                    obs.record_alert(
-                                        source="calendar",
-                                        alert_type="end",
-                                        gge_server=serveur_cible,
-                                        channel="guild",
-                                        recipients=1,
-                                        delivered=0,
-                                        failed=1,
-                                        dm_blocked=0,
-                                    )
-                                except Exception as e:
-                                    logger.error(f"❌ [Calendar] Erreur d'envoi alerte fin calendrier : {e}")
-                                    obs.record_alert(
-                                        source="calendar",
-                                        alert_type="end",
-                                        gge_server=serveur_cible,
-                                        channel="guild",
-                                        recipients=1,
-                                        delivered=0,
-                                        failed=1,
-                                        dm_blocked=0,
-                                    )
+                                except:
+                                    pass
 
                                 tracked = g_info.get("tracked_alliances", [])
                                 if tracked and meta.get("tracker_name"):
                                     event_keys = TRACKER_EVENTS.get(meta["tracker_name"])
                                     if event_keys:
                                         for alliance_nom in tracked:
-                                            try:
-                                                embed_rapport, error, _, _ = await generer_rapport_alliance_embed(
-                                                    self.bot,
-                                                    nom_traduit,
-                                                    event_keys,
-                                                    alliance_nom,
-                                                    meta["color"],
-                                                    custom_server=serveur_cible,
+                                            embed_rapport, error, _, _ = await generer_rapport_alliance_embed(
+                                                self.bot,
+                                                nom_traduit,
+                                                event_keys,
+                                                alliance_nom,
+                                                meta["color"],
+                                                custom_server=serveur_cible,
+                                            )
+                                            if embed_rapport:
+                                                await setup_embed_footer(embed_rapport, None, langue)
+                                                try:
+                                                    await channel.send(embed=embed_rapport)
+                                                except:
+                                                    pass
+                                            else:
+                                                err_msg = t(
+                                                    langue,
+                                                    "cal_report_error",
+                                                    alliance=alliance_nom,
+                                                    error=error,
+                                                    defaut=f"⚠️ Erreur de rapport pour **{alliance_nom}** : {error}",
                                                 )
-                                                if embed_rapport:
-                                                    await setup_embed_footer(embed_rapport, None, langue)
-                                                    try:
-                                                        await channel.send(embed=embed_rapport)
-                                                    except (discord.Forbidden, discord.NotFound):
-                                                        pass
-                                                    except Exception as req_e:
-                                                        logger.error(
-                                                            f"❌ [Calendar] Impossible d'envoyer le rapport final de {alliance_nom} : {req_e}"
-                                                        )
-                                                else:
-                                                    err_msg = t(
-                                                        langue,
-                                                        "cal_report_error",
-                                                        alliance=alliance_nom,
-                                                        error=error,
-                                                        defaut=f"⚠️ Erreur de rapport pour **{alliance_nom}** : {error}",
-                                                    )
-                                                    try:
-                                                        await channel.send(err_msg)
-                                                    except (discord.Forbidden, discord.NotFound):
-                                                        pass
-                                                    except Exception as req_e:
-                                                        logger.error(
-                                                            f"❌ [Calendar] Impossible d'envoyer l'erreur de rapport pour {alliance_nom} : {req_e}"
-                                                        )
-                                            except Exception as rep_e:
-                                                logger.error(
-                                                    f"❌ [Calendar] Erreur de génération du rapport final de {alliance_nom} : {rep_e}"
-                                                )
-
-                    for gid in guilds_to_remove:
-                        if gid in data["guilds"]:
-                            del data["guilds"][gid]
-                            modifie = True
+                                                try:
+                                                    await channel.send(err_msg)
+                                                except:
+                                                    pass
 
                 notified.append(uid_end)
                 modifie = True
