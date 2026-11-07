@@ -100,7 +100,8 @@
 │   ├── recorders.py
 │   └── runtime.py
 ├── site
-│   └── index.html
+│   ├── index.html
+│   └── mapa-sojuszy.html
 ├── webapp
 │   ├── main.py
 │   └── requirements.txt
@@ -117,7 +118,7 @@
 ├── ruff.toml
 └── utils.py
 
-13 directories, 59 files
+13 directories, 60 files
 ```
 <!-- TREE-END -->
 *(This section is auto-updated via GitHub Actions)*
