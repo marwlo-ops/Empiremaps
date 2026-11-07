@@ -402,11 +402,11 @@ let birdsRows=[];
 function renderBirds(){
   const direction=$("birdsSort").value==="desc"?-1:1;
   const rows=[...birdsRows].sort((a,b)=>direction*(Date.parse(a.peace_disabled_at)-Date.parse(b.peace_disabled_at)));
-  if(!rows.length){$("birdsResult").innerHTML='<div class="notice">Brak aktywnych ochron Dove'+(needle?' pasujących do wyszukiwania.':'.')+'</div>';return;}
+  if(!rows.length){$("birdsResult").innerHTML='<div class="notice">Brak aktywnych ochron Dove dla wybranych filtrów.</div>';return;}
   const fmt=v=>new Date(v).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
   const now=Date.now();
-  const body=rows.map(x=>{const end=Date.parse(x.peace_disabled_at);const seconds=Math.max(0,Math.floor((end-now)/1000));const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60),sec=seconds%60;return '<tr><td><b>'+esc(x.player)+'</b></td><td>'+esc(x.alliance)+'</td><td>'+esc(x.might??"—")+'</td><td><b>'+esc(fmt(x.peace_disabled_at))+'</b><small style="display:block;opacity:.75">Pozostało: '+d+' d '+h+' h '+m+' min '+sec+' s</small></td></tr>'}).join("");
-  $("birdsResult").innerHTML='<div class="notice">Aktywne ochrony: <b>'+rows.length+'</b> • Wszystkie sojusze • Skanowano graczy: '+esc(window.birdsScanned||"—")+'</div><div class="table-wrap"><table><thead><tr><th>Gracz</th><th>Sojusz</th><th>Moc</th><th>Koniec ochrony (data i godzina)</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+  const body=rows.map(x=>{const end=Date.parse(x.peace_disabled_at);const seconds=Math.max(0,Math.floor((end-now)/1000));const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60),sec=seconds%60;return '<tr><td><b>'+esc(x.player)+'</b></td><td>'+esc(x.alliance)+'</td><td>'+esc(x.might??"—")+'</td><td><b>'+esc(fmt(x.peace_disabled_at))+'</b><small style="display:block;opacity:.75">Pozostało: '+d+' d '+h+' h '+m+' min '+sec+' s</small></td><td>'+esc(x.updated_at?fmt(x.updated_at):"—")+'</td></tr>'}).join("");
+  $("birdsResult").innerHTML='<div class="notice">Aktywne ochrony: <b>'+rows.length+'</b> • Wybrany zakres: '+esc($("birdsAlliance").value||"Wszystkie sojusze")+( $("birdsPlayer").value.trim() ? " / "+esc($("birdsPlayer").value.trim()) : "")+'</div><div class="table-wrap"><table><thead><tr><th>Gracz</th><th>Sojusz</th><th>Moc</th><th>Koniec ochrony (data i godzina)</th><th>Ostatnia aktualizacja</th></tr></thead><tbody>'+body+'</tbody></table></div>';
 }
 async function loadBirdAlliances(){
   const select=$("birdsAlliance");
