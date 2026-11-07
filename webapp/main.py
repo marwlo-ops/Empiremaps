@@ -250,12 +250,12 @@ async def _scan_server_for_suggestions(server: str):
     status = BOT_SCAN_STATUS.setdefault(key, {})
     status.update({"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "error": None})
     try:
-        # Use the same paging convention as the original bot (/players?page=N).
-        # The API's default page size is 50; an undocumented "limit" parameter
-        # can be ignored and makes page-count calculations unreliable.
+        # Mirror the proven player-scan query used by the source bot.
+        # Tracker returns pagination.total_pages; request the same 100 rows/page.
         scan_params = {
-            "page": 1, "banFilter": -1, "allianceFilter": -1,
-            "protectionFilter": -1, "inactiveFilter": -1,
+            "limit": 100, "page": 1, "banFilter": 0,
+            "allianceFilter": -1, "protectionFilter": -1,
+            "inactiveFilter": 1, "kingdomFilter": 999,
             "orderBy": "might_current", "orderType": "DESC",
         }
         first = await bot_tracker_get("players", key, scan_params)
@@ -273,8 +273,10 @@ async def _scan_server_for_suggestions(server: str):
         if not rows:
             raise RuntimeError("API nie zwróciło listy graczy.")
         total_pages_value = meta.get("total_pages", meta.get("totalPages", meta.get("last_page")))
-        if total_pages_value is None and isinstance(meta.get("total"), int):
-            total_pages_value = max(1, (meta["total"] + 49) // 50)
+        if total_pages_value is None:
+            total_count = meta.get("total_items_count", meta.get("total", meta.get("totalItemsCount")))
+            if isinstance(total_count, (int, float)):
+                total_pages_value = max(1, (int(total_count) + 99) // 100)
         total_pages = max(1, min(int(total_pages_value or 1), 200))
         players = {}
         def add_rows(items):
@@ -298,7 +300,7 @@ async def _scan_server_for_suggestions(server: str):
             page_rows, _ = unpack(payload)
             add_rows(page_rows)
             if page < total_pages:
-                await asyncio.sleep(0.35)
+                await asyncio.sleep(1.2)
         alliances = sorted({v for v in players.values() if v and v.casefold() != "sans alliance"}, key=str.casefold)
         BOT_SUGGEST_CACHE[key] = {
             "loaded": time.time(), "players": sorted(players.keys(), key=str.casefold),
