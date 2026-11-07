@@ -14,5 +14,3 @@ services:
         sync: false
       - key: JWT_SECRET_KEY
         generateValue: true
-      - key: GGETRACKER_API_KEY
-        sync: false
