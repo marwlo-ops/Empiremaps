@@ -493,9 +493,16 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
     now = datetime.now(timezone.utc)
     items = []
     all_alliances = set()
+    requested_alliance = alliance.strip()
     for row in all_rows:
         if not isinstance(row, dict):
             continue
+        alliance_name = row.get("alliance_name") or row.get("alliance") or "Bez sojuszu"
+        if isinstance(alliance_name, dict):
+            alliance_name = alliance_name.get("name") or "Bez sojuszu"
+        alliance_name = str(alliance_name).strip() or "Bez sojuszu"
+        if alliance_name.casefold() not in ("bez sojuszu", "sans alliance"):
+            all_alliances.add(alliance_name)
         until = row.get("peace_disabled_at")
         if not until or str(until).lower() == "null":
             continue
@@ -508,15 +515,9 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
             continue
         if end <= now:
             continue
-        alliance = row.get("alliance_name") or row.get("alliance") or "Bez sojuszu"
-        if isinstance(alliance, dict):
-            alliance = alliance.get("name") or "Bez sojuszu"
-        alliance = str(alliance).strip() or "Bez sojuszu"
-        if alliance.casefold() not in ("bez sojuszu", "sans alliance"):
-            all_alliances.add(alliance)
         items.append({
             "player": row.get("player_name") or row.get("name") or "—",
-            "alliance": alliance,
+            "alliance": alliance_name,
             "player_id": row.get("player_id") or row.get("id"),
             "peace_disabled_at": end.isoformat(),
             "updated_at": row.get("updated_at"),
@@ -525,8 +526,8 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
     all_alliances = sorted(all_alliances, key=str.casefold)
     BOT_DOVE_CACHE[cache_key] = {"loaded": time.time(), "items": items,
         "alliances": all_alliances, "scanned_players": len(all_rows), "generated_at": now.isoformat()}
-    if alliance.strip():
-        wanted_alliance = alliance.strip().casefold()
+    if requested_alliance:
+        wanted_alliance = requested_alliance.casefold()
         items = [item for item in items if item["alliance"].casefold() == wanted_alliance]
     if player.strip():
         wanted_player = player.strip().casefold()
