@@ -93,7 +93,7 @@
         </div>
         <div class="panel" style="margin-bottom:16px">
           <div class="panel-title"><h2>Profil i statystyki gracza</h2><span class="sub">PROFIL • RANKING • STATYSTYKI</span></div>
-          <div class="searchrow"><input class="field" id="botProfilePlayer" placeholder="Wpisz gracza" list="suggest-botProfilePlayer"><button class="btn primary" id="botProfileSearch">Pobierz profil</button></div>
+          <div class="searchrow"><input class="field" id="botProfilePlayer" placeholder="Wpisz gracza" list="suggest-botProfilePlayer"><button class="btn primary" id="botProfileSearch">Pobierz profil</button><button class="btn" id="botProfileHistory">Historia gracza</button></div>
           <div class="result" id="botProfileResult"></div>
         </div>
         <div class="cols">
@@ -258,6 +258,26 @@ $("botProfileSearch").onclick=async()=>{
     const title=profile.player_name||profile.playerName||profile.name||name;
     const view=(label,result)=>result.status==="fulfilled"?'<div class="panel-title"><h3>'+label+'</h3></div>'+objectTable(result.value.data??result.value):'<div class="notice warn">'+label+': '+esc(result.reason?.message||"Błąd pobierania")+'</div>';
     out.innerHTML='<h3>'+esc(title)+'</h3><div class="panel-title"><h3>Profil</h3></div>'+objectTable(profile)+view("Ranking",ranking)+view("Statystyki",stats);
+  }catch(err){out.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
+  finally{btn.disabled=false;btn.textContent=label}
+};
+$("botProfileHistory").onclick=async()=>{
+  const name=$("botProfilePlayer").value.trim(),btn=$("botProfileHistory"),out=$("botProfileResult");
+  if(!name)return;
+  const label=btn.textContent;btn.disabled=true;btn.textContent="Pobieranie…";
+  try{
+    const profile=await api("/api/game/player/"+encodeURIComponent(name)+"?server="+server());
+    const p=profile.data||{},id=Number(p.player_id||p.id||p.playerId||0);
+    if(!id)throw new Error("Nie udało się ustalić ID gracza.");
+    const data=await api("/api/bot/player-history/"+id+"?player="+encodeURIComponent(name)+"&server="+server());
+    const section=(title,items,render)=>'<div class="panel-title"><h3>'+title+' ('+items.length+')</h3></div>'+(items.length?'<div class="table-wrap"><table><tbody>'+items.map(render).join("")+'</tbody></table></div>':'<div class="notice">Brak danych w tej kategorii.</div>');
+    const date=v=>v?new Date(v).toLocaleString("pl-PL"):"Data nieznana";
+    const names=data.names||[],alliances=data.alliances||[],moves=data.movements||[];
+    out.innerHTML='<h3>Historia: '+esc(name)+'</h3>'+
+      section("Zmiany pseudonimu",names,x=>'<tr><td>'+esc(date(x.date||x.created_at))+'</td><td>'+esc(x.old_player_name||"Nieznany")+'</td><td>→</td><td><b>'+esc(x.new_player_name||"Nieznany")+'</b></td></tr>')+
+      section("Zmiany sojuszu",alliances,x=>'<tr><td>'+esc(date(x.date||x.created_at))+'</td><td>'+esc(x.old_alliance_name||"Bez sojuszu")+'</td><td>→</td><td><b>'+esc(x.new_alliance_name||"Bez sojuszu")+'</b></td></tr>')+
+      section("Zmiany pozycji",moves,x=>'<tr><td>'+esc(date(x.date||x.created_at))+'</td><td>'+esc((x.position_x_old??"?")+":"+(x.position_y_old??"?"))+'</td><td>→</td><td><b>'+esc((x.position_x_new??"?")+":"+(x.position_y_new??"?"))+'</b></td></tr>');
+    if(data.partial)out.innerHTML+='<div class="notice warn">Część kategorii historii nie została zwrócona przez API. Powyższe wyniki mogą być niepełne.</div>';
   }catch(err){out.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
   finally{btn.disabled=false;btn.textContent=label}
 };
