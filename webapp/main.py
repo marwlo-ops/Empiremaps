@@ -203,6 +203,111 @@ async def fortress_history(name: str, server: str = "PL1", user: User = Depends(
 async def server_statistics(server: str = "PL1", user: User = Depends(current_user)):
     return {"data": await tracker_get("server/statistics", server), "server": server.upper()}
 
+
+
+# Discord-bot feature port: HTTP services for the Empiremaps web interface.
+BOT_API_BASE = "https://api.gge-tracker.com/api/v1"
+
+def bot_headers(server: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
+        raise HTTPException(400, "Nieprawidłowy identyfikator serwera.")
+    headers = {
+        "Accept": "application/json",
+        "gge-server": server.upper(),
+        "User-Agent": "Mozilla/5.0 Empiremaps-Web/1.0 (GGE Assistant web port)",
+    }
+    key = os.getenv("GGETRACKER_API_KEY")
+    if key:
+        headers["X-Api-Key"] = key
+    return headers
+
+async def bot_tracker_get(path: str, server: str, params: dict | None = None):
+    url = BOT_API_BASE + "/" + path.lstrip("/")
+    try:
+        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
+            response = await client.get(url, headers=bot_headers(server), params=params)
+        if response.status_code == 404:
+            raise HTTPException(404, "Brak danych dla wybranego serwera lub obiektu.")
+        if response.status_code == 429:
+            raise HTTPException(429, "API GGE Tracker ograniczyło liczbę zapytań. Spróbuj ponownie za chwilę.")
+        if response.status_code >= 400:
+            raise HTTPException(502, f"GGE Tracker zwrócił błąd {response.status_code}.")
+        return response.json()
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502, "Nie udało się połączyć z API GGE Tracker.")
+
+@app.get("/api/bot/fortresses/meta")
+async def bot_fortress_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    return {"data": await bot_tracker_get("dungeons/meta", server), "server": server.upper()}
+
+@app.get("/api/bot/fortresses")
+async def bot_fortresses(
+    server: str = "E4K_PL1_BETA",
+    player: str = "",
+    kingdom_ids: str = "",
+    page: int = 1,
+    size: int = 100,
+    user: User = Depends(current_user),
+):
+    if page < 1 or size < 1 or size > 500:
+        raise HTTPException(400, "Nieprawidłowy zakres strony lub liczby wyników.")
+    params = {"page": page, "size": size}
+    if player.strip():
+        params["filterByPlayerName"] = player.strip()[:80]
+        params["nearPlayerName"] = player.strip()[:80]
+    if kingdom_ids.strip():
+        params["filterByKid"] = kingdom_ids.strip()[:200]
+    return {"data": await bot_tracker_get("dungeons", server, params), "server": server.upper()}
+
+@app.get("/api/bot/storms/meta")
+async def bot_storm_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    return {"data": await bot_tracker_get("storms/meta", server), "server": server.upper()}
+
+@app.get("/api/bot/storms/forts")
+async def bot_storm_forts(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    return {"data": await bot_tracker_get("storms/forts", server), "server": server.upper()}
+
+@app.get("/api/bot/storms/isles")
+async def bot_storm_isles(
+    server: str = "E4K_PL1_BETA",
+    occupier: str = "",
+    page: int = 1,
+    size: int = 100,
+    user: User = Depends(current_user),
+):
+    if page < 1 or size < 1 or size > 500:
+        raise HTTPException(400, "Nieprawidłowy zakres strony lub liczby wyników.")
+    params = {"page": page, "size": size}
+    if occupier.strip():
+        params["filterByOccupierName"] = occupier.strip()[:80]
+    return {"data": await bot_tracker_get("storms/isles", server, params), "server": server.upper()}
+
+@app.get("/api/bot/castles/search/{name}")
+async def bot_castle_search(name: str, server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if not name.strip() or len(name) > 100:
+        raise HTTPException(400, "Podaj prawidłową nazwę zamku lub gracza.")
+    return {"data": await bot_tracker_get("castle/search/" + quote(name.strip(), safe=""), server), "server": server.upper()}
+
+@app.get("/api/bot/castles/{castle_id}/analysis")
+async def bot_castle_analysis(castle_id: int, kingdom_id: int = 0, server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if castle_id <= 0 or kingdom_id < 0:
+        raise HTTPException(400, "Nieprawidłowy identyfikator zamku lub królestwa.")
+    return {"data": await bot_tracker_get(f"castle/analysis/{castle_id}", server, {"kingdomId": kingdom_id}), "server": server.upper()}
+
+@app.get("/api/bot/player-ranking/{player_id}")
+async def bot_player_ranking(player_id: int, server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if player_id <= 0:
+        raise HTTPException(400, "Nieprawidłowy identyfikator gracza.")
+    return {"data": await bot_tracker_get(f"statistics/ranking/player/{player_id}", server), "server": server.upper()}
+
+@app.get("/api/bot/player-statistics/{player_id}")
+async def bot_player_statistics(player_id: int, server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if player_id <= 0:
+        raise HTTPException(400, "Nieprawidłowy identyfikator gracza.")
+    return {"data": await bot_tracker_get(f"statistics/player/{player_id}", server), "server": server.upper()}
+
 @app.get("/api/features")
 def features(user: User = Depends(current_user)):
     return {
