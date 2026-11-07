@@ -671,54 +671,82 @@ async def bot_storm_isles(
         return (rows if isinstance(rows, list) else []), (meta if isinstance(meta, dict) else {})
 
     first_rows, meta = unpack_isles(first_payload)
-    total_pages_value = meta.get("total_pages", meta.get("totalPages", meta.get("last_page")))
-    if total_pages_value is None:
-        total_count = meta.get("total_items_count", meta.get("total", meta.get("totalItemsCount")))
-        if isinstance(total_count, (int, float)):
-            total_pages_value = max(1, (int(total_count) + size - 1) // size)
-    total_pages = max(1, min(int(total_pages_value or 1), 200))
+    # Some Tracker responses nest pagination under data/meta; inspect common
+    # wrappers before deciding whether the first page is the only page.
+    meta_candidates = [meta]
+    if isinstance(first_payload, dict):
+        for key in ("meta", "pagination", "page", "data"):
+            value = first_payload.get(key)
+            if isinstance(value, dict):
+                meta_candidates.append(value)
+                for nested_key in ("meta", "pagination"):
+                    nested = value.get(nested_key)
+                    if isinstance(nested, dict):
+                        meta_candidates.append(nested)
+
+    total_pages_value = None
+    total_count = None
+    for candidate in meta_candidates:
+        for key in ("total_pages", "totalPages", "last_page", "lastPage", "last_page_number"):
+            if candidate.get(key) is not None:
+                total_pages_value = candidate.get(key)
+                break
+        if total_pages_value is None:
+            for key in ("total_items_count", "total", "totalItemsCount", "total_count", "totalCount"):
+                value = candidate.get(key)
+                if isinstance(value, (int, float)):
+                    total_count = int(value)
+                    break
+        if total_pages_value is not None:
+            break
+
+    if total_pages_value is None and total_count is not None:
+        total_pages_value = max(1, (total_count + size - 1) // size)
+    try:
+        total_pages = max(1, min(int(total_pages_value), 200)) if total_pages_value is not None else None
+    except (TypeError, ValueError):
+        total_pages = None
+
     merged = {}
     def add_isles(rows):
         added = 0
         for item in rows:
             if not isinstance(item, dict):
                 continue
-            identity = (item.get("isle_id"), item.get("position_x"), item.get("position_y"))
+            # Storm isle coordinates are the unique identity; isle_id is only
+            # the resource class (wood/stone/aquamarine), not a unique island ID.
+            x, y = item.get("position_x"), item.get("position_y")
+            identity = ("xy", x, y) if x is not None and y is not None else (
+                "fallback",
+                item.get("isle_uid") or item.get("island_id") or item.get("id"),
+                item.get("isle_id"),
+                item.get("occupier_name"),
+                item.get("available_at"),
+            )
             if identity not in merged:
                 merged[identity] = item
                 added += 1
             else:
-                # Keep the freshest copy if an island appears on adjacent pages.
                 merged[identity] = item
         return added
 
     add_isles(first_rows)
     pages_fetched = 1
-    if total_pages_value is not None:
-        for current_page in range(page + 1, total_pages + 1):
-            page_params = dict(params)
-            page_params["page"] = current_page
-            page_payload = await bot_tracker_get("storms/isles", server, page_params)
-            page_rows, _ = unpack_isles(page_payload)
-            add_isles(page_rows)
-            pages_fetched += 1
-            if not page_rows:
-                break
-            if current_page < total_pages:
-                await asyncio.sleep(0.25)
-    else:
-        current_page = page + 1
-        while pages_fetched < 200 and len(first_rows) >= size:
-            page_params = dict(params)
-            page_params["page"] = current_page
-            page_payload = await bot_tracker_get("storms/isles", server, page_params)
-            page_rows, _ = unpack_isles(page_payload)
-            added = add_isles(page_rows)
-            pages_fetched += 1
-            if not page_rows or added == 0 or len(page_rows) < size:
-                break
-            current_page += 1
-            await asyncio.sleep(0.25)
+    current_page = page + 1
+    # Trust reported pagination when available. Otherwise continue even when
+    # the API caps page size below the requested size; stop on empty/repeated
+    # pages, not on a short page.
+    while pages_fetched < 200 and (total_pages is None or current_page <= total_pages):
+        page_params = dict(params)
+        page_params["page"] = current_page
+        page_payload = await bot_tracker_get("storms/isles", server, page_params)
+        page_rows, _ = unpack_isles(page_payload)
+        added = add_isles(page_rows)
+        pages_fetched += 1
+        if not page_rows or added == 0:
+            break
+        current_page += 1
+        await asyncio.sleep(0.25)
 
     all_isles = list(merged.values())
     allowed = {1:[3,6], 2:[1,4], 3:[2,5]}.get(resource)
