@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#10151d">
+  <meta name="description" content="GGE Assistant — centrum dowodzenia dla graczy Goodgame Empire i Empire: Four Kingdoms. Radary, fortece, rankingi, gracze i wydarzenia.">
+  <title>Empiremaps — GGE Assistant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#0c1118;--panel:#141d28;--panel2:#192533;--gold:#e8bd68;--gold2:#f5d99a;--text:#f3f0e8;--muted:#a8b2bd;--line:#2b3948;--green:#7ac9a0}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--text);font-family:Manrope,system-ui,sans-serif;line-height:1.65}a{color:inherit;text-decoration:none}.wrap{width:min(1160px,calc(100% - 40px));margin:auto}
+    .top{position:sticky;top:0;z-index:10;background:#0c1118eF;border-bottom:1px solid #ffffff12;backdrop-filter:blur(16px)}.nav{height:76px;display:flex;align-items:center;justify-content:space-between;gap:24px}.brand{display:flex;align-items:center;gap:12px;font-family:Cinzel,serif;font-weight:800;letter-spacing:.08em}.brand img{width:42px;height:42px;object-fit:contain}.brand span{color:var(--gold)}.links{display:flex;gap:28px;color:#c4cbd2;font-size:13px;font-weight:700}.links a:hover{color:var(--gold)}.nav-cta,.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;border-radius:8px;padding:12px 18px;font-weight:800;font-size:13px;transition:.2s}.nav-cta,.btn-primary{background:linear-gradient(135deg,var(--gold2),var(--gold));color:#17140e;box-shadow:0 8px 30px #e8bd6825}.nav-cta:hover,.btn-primary:hover{transform:translateY(-2px);filter:brightness(1.07)}.menu{display:none;background:none;border:1px solid var(--line);color:white;border-radius:8px;padding:9px}
+    .hero{position:relative;overflow:hidden;padding:104px 0 92px;background:radial-gradient(ellipse at 80% 35%,#8a642b30,transparent 42%),linear-gradient(115deg,#0c1118 35%,#172331 100%)}.hero:after{content:"";position:absolute;inset:0;background-image:linear-gradient(#ffffff08 1px,transparent 1px),linear-gradient(90deg,#ffffff08 1px,transparent 1px);background-size:54px 54px;mask-image:linear-gradient(90deg,transparent,#000 80%);pointer-events:none}.hero-grid{display:grid;grid-template-columns:1.1fr .9fr;align-items:center;gap:54px;position:relative;z-index:1}.eyebrow{color:var(--gold);font-size:11px;font-weight:800;letter-spacing:.22em;text-transform:uppercase;display:flex;align-items:center;gap:10px}.eyebrow:before{content:"";width:28px;height:1px;background:var(--gold)}h1,h2,h3{font-family:Cinzel,Georgia,serif;line-height:1.16}h1{font-size:clamp(42px,6vw,72px);letter-spacing:-.035em;margin:20px 0}h1 em{font-style:normal;color:var(--gold)}.lead{max-width:590px;color:#b9c2cb;font-size:16px}.actions{display:flex;flex-wrap:wrap;gap:12px;margin-top:30px}.btn-outline{border:1px solid #657181;color:#e7e9eb;background:#ffffff08}.btn-outline:hover{border-color:var(--gold);color:var(--gold)}.hero-note{margin-top:22px;color:#8794a2;font-size:11px}.hero-art{min-height:390px;position:relative;display:grid;place-items:center}.crest{width:min(340px,80vw);aspect-ratio:1;border:1px solid #e8bd6855;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle,#e8bd681c,#121b27 62%,transparent 63%);box-shadow:0 0 90px #e8bd6815,inset 0 0 55px #e8bd6810;position:relative}.crest:before,.crest:after{content:"";position:absolute;inset:18px;border:1px solid #e8bd6833;border-radius:50%}.crest:after{inset:38px;border-style:dashed}.crest img{width:58%;height:58%;object-fit:contain;filter:drop-shadow(0 18px 30px #0009)}.float-card{position:absolute;background:#172330eF;border:1px solid #e8bd6844;border-radius:10px;padding:13px 16px;box-shadow:0 14px 35px #0006;font-size:12px}.float-card b{display:block;color:var(--gold2);font-size:13px}.fc-one{top:14%;right:-2%}.fc-two{bottom:14%;left:-2%}
+    .stats{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:#101821}.stats-grid{display:grid;grid-template-columns:repeat(4,1fr)}.stat{padding:24px 16px;text-align:center;border-right:1px solid var(--line)}.stat:last-child{border:0}.stat b{display:block;font-family:Cinzel,serif;color:var(--gold);font-size:19px}.stat span{font-size:11px;color:var(--muted)}
+    section{padding:86px 0}.section-head{text-align:center;max-width:680px;margin:0 auto 42px}.section-head h2{font-size:clamp(29px,4vw,42px);margin:12px 0}.section-head p{color:var(--muted);font-size:14px}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{background:linear-gradient(145deg,#182431,#121a24);border:1px solid var(--line);border-radius:12px;padding:25px;min-height:190px;transition:.2s}.card:hover{transform:translateY(-4px);border-color:#b78c4c88}.ico{width:42px;height:42px;display:grid;place-items:center;border-radius:10px;background:#e8bd6818;color:var(--gold);font-size:21px;margin-bottom:18px}.card h3{font-size:17px;margin:0 0 9px}.card p{font-size:12px;color:var(--muted);margin:0}.commands{background:#101821}.command-layout{display:grid;grid-template-columns:.7fr 1.3fr;gap:42px;align-items:start}.command-copy h2{font-size:35px;margin:12px 0}.command-copy p{color:var(--muted);font-size:14px}.search{width:100%;padding:13px 15px;background:#0c131c;border:1px solid var(--line);border-radius:8px;color:white;font:inherit;margin:15px 0}.command-list{display:grid;gap:9px}.cmd{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:13px 16px;background:#17222e;border:1px solid #293847;border-radius:8px}.cmd code{color:var(--gold2);font-weight:800;font-size:12px}.cmd span{font-size:12px;color:#aeb9c3;text-align:right}.cmd[hidden]{display:none}
+    .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.step{padding:24px;border-left:1px solid #a67d45}.step small{color:var(--gold);font-weight:800;letter-spacing:.16em}.step h3{font-size:17px;margin:12px 0}.step p{font-size:12px;color:var(--muted)}.cta-band{padding:0 0 88px}.cta-inner{padding:48px;border:1px solid #a67d4566;border-radius:14px;background:radial-gradient(ellipse at 90% 0%,#9a71302c,transparent 45%),#151f2b;display:flex;align-items:center;justify-content:space-between;gap:28px}.cta-inner h2{font-size:30px;margin:8px 0}.cta-inner p{color:var(--muted);font-size:13px;margin:0}.footer{border-top:1px solid var(--line);padding:30px 0;color:#8996a3;font-size:11px}.foot{display:flex;justify-content:space-between;gap:20px;align-items:center}.foot strong{color:var(--gold)}.disclaimer{max-width:700px;margin-top:12px}
+    @media(max-width:800px){.links{display:none;position:absolute;top:76px;left:0;right:0;background:#111a24;padding:20px;flex-direction:column;gap:18px;border-bottom:1px solid var(--line)}.links.open{display:flex}.menu{display:block}.nav-cta{display:none}.hero{padding:70px 0}.hero-grid{grid-template-columns:1fr;gap:20px}.hero-art{min-height:300px}.fc-one{right:0}.fc-two{left:0}.cards{grid-template-columns:repeat(2,1fr)}.command-layout{grid-template-columns:1fr;gap:18px}.cta-inner{align-items:flex-start;flex-direction:column}}
+    @media(max-width:520px){.wrap{width:min(100% - 28px,1160px)}.brand{font-size:13px}.hero-art{min-height:260px}.crest{width:245px}.float-card{font-size:10px;padding:10px}.stats-grid{grid-template-columns:repeat(2,1fr)}.stat:nth-child(2){border-right:0}.stat:nth-child(-n+2){border-bottom:1px solid var(--line)}.cards,.steps{grid-template-columns:1fr}.cmd{align-items:flex-start;flex-direction:column;gap:4px}.cmd span{text-align:left}.cta-inner{padding:28px}.foot{align-items:flex-start;flex-direction:column}section{padding:65px 0}}
+  </style>
+</head>
+<body>
+<header class="top"><div class="wrap nav">
+  <a class="brand" href="#"><img src="../assets/logo.webp" alt=""><span>EMPIREMAPS</span></a>
+  <nav class="links" id="navlinks"><a href="#funkcje">MOŻLIWOŚCI</a><a href="#komendy">KOMENDY</a><a href="#start">JAK ZACZĄĆ</a><a href="#kontakt">POMOC</a></nav>
+  <a class="nav-cta" href="https://discord.com/oauth2/authorize?client_id=1472309793065533493&scope=bot%20applications.commands" target="_blank" rel="noopener">＋ Dodaj bota</a>
+  <button class="menu" id="menu" aria-label="Otwórz menu">☰</button>
+</div></header>
+<main>
+  <section class="hero"><div class="wrap hero-grid">
+    <div><div class="eyebrow">CENTRUM DOWODZENIA GGE</div><h1>Twoje imperium.<br><em>Pełna kontrola.</em></h1>
+      <p class="lead">GGE Assistant to rozbudowany bot Discord dla graczy Goodgame Empire i Empire: Four Kingdoms. Śledź wydarzenia, analizuj rywali, wyszukuj cele i miej najważniejsze informacje zawsze pod ręką.</p>
+      <div class="actions"><a class="btn btn-primary" href="https://discord.com/oauth2/authorize?client_id=1472309793065533493&scope=bot%20applications.commands" target="_blank" rel="noopener">⚔ Dodaj GGE Assistant</a><a class="btn btn-outline" href="#funkcje">Poznaj możliwości&nbsp; ↓</a></div>
+      <div class="hero-note">NIEOFICJALNY PROJEKT SPOŁECZNOŚCI • GOODGAME EMPIRE / E4K</div>
+    </div>
+    <div class="hero-art"><div class="crest"><img src="../assets/logo.webp" alt="Logo GGE Assistant"></div><div class="float-card fc-one">⌖ <b>Radary i mapy</b>Wyszukiwanie celów</div><div class="float-card fc-two">♜ <b>Twoja strategia</b>Dane i historia</div></div>
+  </div></section>
+  <div class="stats"><div class="wrap stats-grid"><div class="stat"><b>GGE + E4K</b><span>Obsługiwane gry</span></div><div class="stat"><b>24/7*</b><span>Automatyczne zadania bota</span></div><div class="stat"><b>365 dni</b><span>Historia ataków fortec</span></div><div class="stat"><b>Discord</b><span>Jedno centrum informacji</span></div></div></div>
+  <section id="funkcje"><div class="wrap"><div class="section-head"><div class="eyebrow" style="justify-content:center">ARSENAŁ MOŻLIWOŚCI</div><h2>Wszystko, czego potrzebuje dowódca</h2><p>Narzędzia pomagające monitorować serwer, planować działania i szybciej docierać do kluczowych informacji.</p></div>
+    <div class="cards">
+      <article class="card"><div class="ico">⌖</div><h3>Radar celów</h3><p>Wyszukuj cele na mapie według filtrów i analizuj dostępne informacje o graczach.</p></article>
+      <article class="card"><div class="ico">♜</div><h3>Fortece</h3><p>Skanowanie wolnych fortec na piaskach, lodzie i szczytach oraz historia ataków.</p></article>
+      <article class="card"><div class="ico">♟</div><h3>Gracze i sojusze</h3><p>Profile, historia, porównania, siła sojuszy i analiza składu przeciwnika.</p></article>
+      <article class="card"><div class="ico">🏆</div><h3>Rankingi</h3><p>Rankingi wydarzeń, ligi, statystyki graczy i zestawienia sojuszy.</p></article>
+      <article class="card"><div class="ico">▦</div><h3>Kalendarz wydarzeń</h3><p>Podgląd wydarzeń oraz automatyczne powiadomienia na serwerze Discord.</p></article>
+      <article class="card"><div class="ico">⛈</div><h3>Wyspy Burzowe</h3><p>Analiza wysp i fortów, posiadaczy oraz dostępności obiektów na mapie.</p></article>
+    </div>
+  </div></section>
+  <section class="commands" id="komendy"><div class="wrap command-layout">
+    <div class="command-copy"><div class="eyebrow">SZYBKI PODGLĄD</div><h2>Komendy pod ręką</h2><p>To wybrane komendy opisane w dokumentacji projektu. Dostępność konkretnej funkcji zależy od konfiguracji serwera i uprawnień bota.</p><a class="btn btn-outline" href="https://github.com/marwlo-ops/Empiremaps" target="_blank" rel="noopener">Dokumentacja na GitHub ↗</a></div>
+    <div><input class="search" id="search" type="search" placeholder="Szukaj komendy, np. fortress, player…" aria-label="Szukaj komendy"><div class="command-list" id="commandList">
+      <div class="cmd"><code>/setup</code><span>Ustaw język i główny serwer gry</span></div>
+      <div class="cmd"><code>/status</code><span>Sprawdź status systemu</span></div>
+      <div class="cmd"><code>/calendar current</code><span>Wyświetl aktualny kalendarz wydarzeń</span></div>
+      <div class="cmd"><code>/rank event</code><span>Rankingi standardowych wydarzeń</span></div>
+      <div class="cmd"><code>/player profile</code><span>Profil i historia gracza</span></div>
+      <div class="cmd"><code>/player compare</code><span>Porównaj dwóch graczy</span></div>
+      <div class="cmd"><code>/alliance profile</code><span>Profil i statystyki sojuszu</span></div>
+      <div class="cmd"><code>/target search</code><span>Wyszukiwanie celów na mapie</span></div>
+      <div class="cmd"><code>/fortress scan</code><span>Zarządzanie skanowaniem fortec</span></div>
+      <div class="cmd"><code>/fortress history</code><span>Historia ataków na fortece</span></div>
+      <div class="cmd"><code>/storm forts</code><span>Wyszukaj forty na Wyspach Burzowych</span></div>
+      <div class="cmd"><code>/help</code><span>Otwórz pomoc bota</span></div>
+    </div></div>
+  </div></section>
+  <section id="start"><div class="wrap"><div class="section-head"><div class="eyebrow" style="justify-content:center">PIERWSZE KROKI</div><h2>Dołącz do gry w trzech krokach</h2><p>Uruchom bota na swoim serwerze Discord i skonfiguruj go zgodnie z potrzebami sojuszu.</p></div>
+    <div class="steps"><article class="step"><small>01 / ZAPROŚ</small><h3>Dodaj bota</h3><p>Użyj przycisku zaproszenia i wybierz serwer Discord, na którym możesz zarządzać aplikacjami.</p></article><article class="step"><small>02 / SKONFIGURUJ</small><h3>Wpisz /setup</h3><p>Wybierz język i główny serwer gry. Następnie sprawdź dostępne komendy przez /help.</p></article><article class="step"><small>03 / KORZYSTAJ</small><h3>Uruchom narzędzia</h3><p>Skonfiguruj kalendarz, radar i monitorowanie zgodnie z uprawnieniami oraz potrzebami społeczności.</p></article></div>
+  </div></section>
+  <div class="cta-band" id="kontakt"><div class="wrap"><div class="cta-inner"><div><div class="eyebrow">GOTOWY DO DZIAŁANIA?</div><h2>Dołącz do GGE Assistant</h2><p>Masz pytania lub potrzebujesz pomocy? Odwiedź serwer wsparcia społeczności.</p></div><div class="actions"><a class="btn btn-primary" href="https://discord.com/oauth2/authorize?client_id=1472309793065533493&scope=bot%20applications.commands" target="_blank" rel="noopener">Dodaj bota ↗</a><a class="btn btn-outline" href="https://discord.gg/zrrhxp6wDj" target="_blank" rel="noopener">Serwer pomocy ↗</a></div></div></div></div>
+</main>
+<footer class="footer"><div class="wrap"><div class="foot"><div><strong>EMPIREMAPS</strong> · GGE Assistant</div><div><a href="https://github.com/marwlo-ops/Empiremaps" target="_blank" rel="noopener">GitHub</a>　·　<a href="https://top.gg/bot/1472309793065533493" target="_blank" rel="noopener">Top.gg</a>　·　<a href="https://discord.gg/zrrhxp6wDj" target="_blank" rel="noopener">Discord</a></div></div><p class="disclaimer">* Dostępność usług zależy od działania hostingu, bota i zewnętrznych API. Projekt jest nieoficjalny i nie jest powiązany z Goodgame Studios. Znaki towarowe i zasoby gry należą do ich właścicieli.</p><p>© <span id="year"></span> Empiremaps. Strona społecznościowa projektu.</p></div></footer>
+<script>
+  const menu=document.getElementById('menu'),nav=document.getElementById('navlinks');
+  menu.addEventListener('click',()=>nav.classList.toggle('open'));
+  nav.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>nav.classList.remove('open')));
+  document.getElementById('search').addEventListener('input',e=>{const q=e.target.value.toLowerCase();document.querySelectorAll('#commandList .cmd').forEach(el=>el.hidden=!el.textContent.toLowerCase().includes(q));});
+  document.getElementById('year').textContent=new Date().getFullYear();
+</script>
+</body></html>
