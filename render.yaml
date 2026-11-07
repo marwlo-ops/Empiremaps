@@ -1,10 +1,3 @@
-databases:
-  - name: empiremaps-db
-    plan: free
-    region: frankfurt
-    databaseName: empiremaps
-    user: empiremaps
-
 services:
   - type: web
     name: empiremaps-web
@@ -18,9 +11,7 @@ services:
     autoDeploy: true
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: empiremaps-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET_KEY
         generateValue: true
       - key: GGETRACKER_API_KEY
