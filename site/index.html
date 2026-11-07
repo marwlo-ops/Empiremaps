@@ -179,9 +179,8 @@ function attachSuggestions(inputId,kind){
    },180);
  });
 }
-["playerName","botTargetName","botFortressPlayer"].forEach(id=>attachSuggestions(id,"players"));
-["allianceName"].forEach(id=>attachSuggestions(id,"alliances"));
-attachSuggestions("botStormOccupier","players");
+["playerName","botTargetName","botProfilePlayer","botFortressPlayer","botStormOccupier","targetOriginPlayer"].forEach(id=>attachSuggestions(id,"players"));
+["allianceName","targetAllianceFilter"].forEach(id=>attachSuggestions(id,"alliances"));
 
 async function runBotSearch(btn,result,url){
   btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z silnika GGE Assistant…</div>';
