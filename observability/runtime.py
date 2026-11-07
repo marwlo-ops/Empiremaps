@@ -93,7 +93,7 @@ async def start(bot=None) -> None:
         await _client.start()
         if bot is not None and _heartbeat is None:
             _heartbeat = asyncio.create_task(_heartbeat_loop(bot), name="clickhouse_heartbeat")
-        _log.info("ClickHouse telemetry started -> %s", _settings.masked_target())
+        _log.info("ClickHouse démarstarterée -> %s", _settings.masked_target())
     except Exception as error:
         _log.warning("Unable to start telemetry service (skipped) : %s", error)
 
@@ -126,7 +126,7 @@ def get_settings() -> ClickHouseSettings | None:
 
 def collect_status(bot) -> dict:
     """Collect the bot_status gauges from the live bot state"""
-    from utils import cache_mngr  # Remplacement de CACHE par cache_mngr
+    from utils import CACHE
 
     try:
         latency = bot.latency
@@ -152,8 +152,7 @@ def collect_status(bot) -> dict:
     maintenance = bool(getattr(bot, "maintenance_mode", False))
     cached_players = 0
     try:
-        # Adaptation pour utiliser cache_mngr.server_data
-        cached_players = sum(len(v.get("players", [])) for v in cache_mngr.server_data.values())
+        cached_players = sum(len(v.get("players", [])) for v in CACHE.values())
     except Exception:
         pass
 
@@ -170,7 +169,7 @@ def collect_status(bot) -> dict:
         "cpu_pct": _metrics.cpu_pct(),
         "cogs_loaded": len(bot.cogs),
         "tasks_running": tasks,
-        "cache_servers": len(cache_mngr.server_data),
+        "cache_servers": len(CACHE),
         "cache_players": cached_players,
         "scan_flag_active": int(bool(getattr(bot, "scan_flag_detected", False))),
     }
@@ -184,7 +183,7 @@ async def _heartbeat_loop(bot) -> None:
             await asyncio.sleep(_settings.heartbeat_s)
             gauges = collect_status(bot)
             gauges["event_loop_lag_ms"] = await _event_loop_lag_ms()
-            gauges.update(await _data_gauges())  # Rendu awaitable pour appeler les fonctions asynchrones
+            gauges.update(_data_gauges())
             recorders.record_bot_status(**gauges)
             recorders.sweep_pending()
         except asyncio.CancelledError:
@@ -194,34 +193,35 @@ async def _heartbeat_loop(bot) -> None:
             pass
 
 
-async def _data_gauges() -> dict:
+def _data_gauges() -> dict:
     """Gauges taken from the JSON files: radar, fortresses, votes"""
+    import json
     from datetime import datetime
 
-    # Import des fonctions asynchrones depuis utils
-    from utils import JOUEURS_DIR, async_json_load, load_dungeons_async, load_surveillance_async
+    from utils import JOUEURS_DIR
 
     gauges = {}
     try:
-        # Utilisation de la nouvelle fonction asynchrone non-bloquante
-        data = await load_surveillance_async()
-        gauges["radar_players"] = len(data.get("players", {}))
-        gauges["radar_alliances"] = len(data.get("alliances", {}))
-    except Exception as e:
-        _log.error(f"❌ [Metrics] Erreur load_surveillance_async : {e}")
-
+        path = JOUEURS_DIR / "surveillance.json"
+        if path.exists():
+            with open(path, encoding="utf-8") as handle:
+                data = json.load(handle)
+            gauges["radar_players"] = len(data.get("players", {}))
+            gauges["radar_alliances"] = len(data.get("alliances", {}))
+    except Exception:
+        pass
     try:
-        # Utilisation de la nouvelle fonction asynchrone non-bloquante
-        data = await load_dungeons_async()
-        gauges["fortress_sessions"] = len(data.get("sessions", {}))
-    except Exception as e:
-        _log.error(f"❌ [Metrics] Erreur load_dungeons_async : {e}")
-
+        path = JOUEURS_DIR / "forteresses_sessions.json"
+        if path.exists():
+            with open(path, encoding="utf-8") as handle:
+                gauges["fortress_sessions"] = len(json.load(handle).get("sessions", {}))
+    except Exception:
+        pass
     try:
         path = JOUEURS_DIR / "votes.json"
         if path.exists():
-            # Utilisation de async_json_load générique
-            votes = await async_json_load(path)
+            with open(path, encoding="utf-8") as handle:
+                votes = json.load(handle)
             now = datetime.now()
             active = 0
             for expiry in votes.values():
@@ -231,7 +231,6 @@ async def _data_gauges() -> dict:
                 except Exception:
                     pass
             gauges["active_shields"] = active
-    except Exception as e:
-        _log.error(f"❌ [Metrics] Erreur lecture des votes : {e}")
-
+    except Exception:
+        pass
     return gauges
