@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import create_engine, String, DateTime, Integer, select
+from sqlalchemy import create_engine, String, DateTime, Integer, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -28,11 +28,15 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
+with engine.begin() as connection:
+    connection.execute(text('CREATE SCHEMA IF NOT EXISTS empiremaps'))
+
 class Base(DeclarativeBase):
     pass
 
 class User(Base):
     __tablename__ = "web_users"
+    __table_args__ = {"schema": "empiremaps"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
