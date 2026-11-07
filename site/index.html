@@ -85,6 +85,11 @@
           </div>
         </div>
         <div class="panel" style="margin-top:16px">
+          <div class="panel-title"><h2>Radar ruchów</h2><button class="btn primary" id="botRadarLoad">Odśwież ruchy</button></div>
+          <div class="searchrow"><select class="field" id="botRadarCastleType"><option value="1">Zamki graczy</option><option value="2">Inne zamki</option><option value="0">Wszystkie typy</option></select><select class="field" id="botRadarMovementType"><option value="3">Ruchy ataku</option><option value="0">Wszystkie ruchy</option><option value="1">Ruchy wsparcia</option></select></div>
+          <div class="result" id="botRadarResult"></div>
+        </div>
+        <div class="panel" style="margin-top:16px">
           <div class="panel-title"><h2>Analiza zamku</h2><span class="sub">Dane pobierane bezpośrednio z API gry</span></div>
           <div class="searchrow"><input class="field" id="botCastleId" type="number" min="1" placeholder="ID zamku"><input class="field" id="botKingdomId" type="number" min="0" placeholder="ID królestwa (0 jeśli nieznane)"><button class="btn primary" id="botCastleAnalysis">Analizuj zamek</button></div>
           <div class="result" id="botCastleResult"></div>
@@ -130,6 +135,8 @@ async function runBotSearch(btn,result,url){
 $("botTargetSearch").onclick=()=>{const n=$("botTargetName").value.trim();if(n)runBotSearch($("botTargetSearch"),$("botTargetResult"),"/api/bot/castles/search/"+encodeURIComponent(n)+"?server="+server())};
 $("botFortressLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"100",player:$("botFortressPlayer").value.trim(),kingdom_ids:$("botFortressKingdom").value.trim()});runBotSearch($("botFortressLoad"),$("botFortressResult"),"/api/bot/fortresses?"+q.toString())};
 $("botStormLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"100",occupier:$("botStormOccupier").value.trim()});runBotSearch($("botStormLoad"),$("botStormResult"),"/api/bot/storms/isles?"+q.toString())};
+$("botRadarLoad").dataset.label=$("botRadarLoad").textContent;
+$("botRadarLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",castle_type:$("botRadarCastleType").value,movement_type:$("botRadarMovementType").value});runBotSearch($("botRadarLoad"),$("botRadarResult"),"/api/bot/radar/movements?"+q.toString())};
 $("botCastleAnalysis").onclick=()=>{const id=$("botCastleId").value.trim();if(!id)return;const q=new URLSearchParams({server:$("server").value,kingdom_id:$("botKingdomId").value||"0"});runBotSearch($("botCastleAnalysis"),$("botCastleResult"),"/api/bot/castles/"+encodeURIComponent(id)+"/analysis?"+q.toString())};
 
 ["playerName","allianceName","fortressName"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")$(id.replace("Name", "Search")).click()}));
