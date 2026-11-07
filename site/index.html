@@ -61,7 +61,11 @@
       <section class="view" id="view-alliance"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Sojusze</h1><p>Wyszukaj sojusz i sprawdź dostępne informacje.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="allianceName" placeholder="Nazwa sojuszu" list="suggest-allianceName"><button class="btn primary" id="allianceSearch">Szukaj sojuszu</button></div><div class="result" id="allianceResult"></div></div></section>
       <section class="view" id="view-fortress"><div class="welcome"><div><div class="eyebrow">HISTORIA DZIAŁAŃ</div><h1>Historia fortec</h1><p>Lista zarejestrowanych ataków gracza na fortece.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="fortressName" placeholder="Nazwa gracza"><button class="btn primary" id="fortressSearch">Pobierz historię</button></div><div class="result" id="fortressResult"></div></div></section>
       <section class="view" id="view-server"><div class="welcome"><div><div class="eyebrow">ANALITYKA ŚWIATA</div><h1>Statystyki serwera</h1><p>Globalne statystyki wybranego świata gry.</p></div></div><div class="panel"><div class="panel-title"><h2>Podsumowanie świata</h2><button class="btn primary" id="serverSearch">Odśwież dane</button></div><div class="result" id="serverResult"></div></div></section>
-      <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Przenoszenie funkcji mapy i wyszukiwania celów do interfejsu WWW.</p></div></div><div class="grid">
+      <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Przenoszenie funkcji mapy i wyszukiwania celów do interfejsu WWW.</p></div></div>
+        <div class="panel" style="margin-bottom:16px">
+          <div class="panel-title"><h2>Indeks graczy i sojuszy</h2><div class="searchrow"><button class="btn" id="botScanRefresh">Sprawdź stan</button><button class="btn primary" id="botScanStart">Uruchom skan serwera</button></div></div>
+          <div class="result" id="botScanStatus"><div class="notice">Indeks nazw jest pobierany z wybranego serwera. Możesz uruchomić skan ręcznie.</div></div>
+        </div><div class="grid">
           <div class="metric"><span class="micon">⌖</span><b>Wyszukiwanie celów</b><span>Wyszukaj zamki i obiekty</span></div>
           <div class="metric"><span class="micon">♜</span><b>Fortece</b><span>Lista i metadane fortec</span></div>
           <div class="metric"><span class="micon">🌊</span><b>Wyspy sztormowe</b><span>Forty i zajęte wyspy</span></div>
@@ -111,7 +115,7 @@ $("authForm").onsubmit=async e=>{e.preventDefault();$("authSubmit").disabled=tru
 $("logout").onclick=()=>{token="";localStorage.removeItem("empiremaps_token");$("appShell").classList.add("hidden");$("authScreen").classList.remove("hidden");$("password").value=""};
 async function boot(){if(!token)return;try{const user=await api("/api/auth/me");showApp(user)}catch{token="";localStorage.removeItem("empiremaps_token")}}boot();
 const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar",events:"Wydarzenia"};
-function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open")}
+function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus()}
 $("nav").onclick=e=>{const b=e.target.closest("button[data-view]");if(b)go(b.dataset.view)};
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
 $("mobileMenu").onclick=()=>$("sidebar").classList.toggle("open");
@@ -138,7 +142,7 @@ function attachSuggestions(inputId,kind){
    suggestionTimers[inputId]=setTimeout(async()=>{
      try{
        const params=new URLSearchParams({q:query,kind,server:$("server").value});
-       const result=await api("/api/bot/suggestions?"+params.toString());
+       const result=await api("/api/bot/suggestions?"+params.toString());if(result.scan_running||result.scan_available)refreshBotScanStatus();
        list.innerHTML=(result.items||[]).map(value=>'<option value="'+esc(value)+'"></option>').join("");
        if(!result.scan_available)input.title=result.message||"Trwa pobieranie danych serwera";
        else input.title="Podpowiedzi z indeksu graczy i sojuszy serwera";
@@ -165,6 +169,41 @@ $("botRadarLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").v
 $("botCastleAnalysis").onclick=()=>{const id=$("botCastleId").value.trim();if(!id)return;const q=new URLSearchParams({server:$("server").value,kingdom_id:$("botKingdomId").value||"0"});runBotSearch($("botCastleAnalysis"),$("botCastleResult"),"/api/bot/castles/"+encodeURIComponent(id)+"/analysis?"+q.toString())};
 
 ["playerName","allianceName","fortressName"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")$(id.replace("Name", "Search")).click()}));
+
+let botScanPollTimer=null;
+async function refreshBotScanStatus(schedule=true){
+  try{
+    const data=await api("/api/bot/scan/status?server="+server());
+    const scan=data.scan||{};
+    const box=$("botScanStatus");
+    if(scan.running){
+      box.innerHTML='<div class="notice">Skanowanie '+esc(data.server)+' trwa. Po zakończeniu dostępne będą podpowiedzi graczy i sojuszy.</div>';
+    }else if(scan.error){
+      box.innerHTML='<div class="notice warn">Skan zakończył się błędem: '+esc(scan.error)+'</div>';
+    }else if(data.cached){
+      const date=data.cached_at?new Date(data.cached_at*1000).toLocaleString("pl-PL"):"—";
+      const details=scan.pages?(' • Strony: '+esc(scan.pages)):"";
+      box.innerHTML='<div class="notice">Indeks gotowy: <b>'+esc(data.players)+'</b> graczy, <b>'+esc(data.alliances)+'</b> sojuszy. Aktualizacja: '+esc(date)+details+'</div>';
+    }else{
+      box.innerHTML='<div class="notice">Brak gotowego indeksu dla '+esc(data.server)+'. Uruchom skan, aby włączyć podpowiedzi.</div>';
+    }
+    if(botScanPollTimer){clearTimeout(botScanPollTimer);botScanPollTimer=null;}
+    if(schedule&&scan.running)botScanPollTimer=setTimeout(()=>refreshBotScanStatus(true),5000);
+  }catch(err){
+    $("botScanStatus").innerHTML='<div class="notice warn">'+esc(err.message)+'</div>';
+  }
+}
+$("botScanRefresh").onclick=()=>refreshBotScanStatus();
+$("botScanStart").onclick=async()=>{
+  const btn=$("botScanStart");btn.disabled=true;
+  try{
+    await api("/api/bot/scan/"+encodeURIComponent($("server").value),{method:"POST"});
+    await refreshBotScanStatus();
+  }catch(err){$("botScanStatus").innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
+  finally{btn.disabled=false}
+};
+$("server").addEventListener("change",()=>{if(!$("view-map").classList.contains("active"))return;refreshBotScanStatus();});
+
 </script>
 <datalist id="suggest-playerName"></datalist>
 <datalist id="suggest-allianceName"></datalist>
