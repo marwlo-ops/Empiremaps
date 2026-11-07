@@ -103,7 +103,7 @@
             <div class="result" id="botFortressResult"></div>
           </div>
           <div class="panel">
-            <div class="panel-title"><h2>Wyspy sztormowe</h2><button class="btn primary" id="botStormLoad">Pobierz wyspy</button></div>
+            <div class="panel-title"><h2>Wyspy sztormowe</h2><div class="searchrow"><button class="btn" id="botStormAvailableTab" type="button">Dostępne / wkrótce</button><button class="btn primary" id="botStormLoad">Pobierz wyspy</button></div></div>
             <div class="searchrow"><input class="field" id="botStormOccupier" placeholder="Filtruj po zajmującym graczu" list="suggest-botStormOccupier"><select class="field" id="botStormState"><option value="0">Wszystkie stany</option><option value="1">Wolne — gotowe do zajęcia</option><option value="2">Zajęte</option><option value="3">Dostępne — oczekujące na pojawienie</option></select><select class="field" id="botStormResource"><option value="0">Wszystkie surowce</option><option value="1">Akwamaryna</option><option value="2">Drewno</option><option value="3">Kamień</option></select></div>
             <div class="result" id="botStormResult"></div>
           </div>
@@ -226,6 +226,7 @@ async function runBotSearch(btn,result,url){
 $("botTargetSearch").onclick=()=>{const n=$("botTargetName").value.trim();if(n)runBotSearch($("botTargetSearch"),$("botTargetResult"),"/api/bot/castles/search/"+encodeURIComponent(n)+"?server="+server())};
 $("botFortressLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"100",player:$("botFortressPlayer").value.trim(),kingdom_ids:$("botFortressKingdom").value.trim()});runBotSearch($("botFortressLoad"),$("botFortressResult"),"/api/bot/fortresses?"+q.toString())};
 $("botStormLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"500",occupier:$("botStormOccupier").value.trim(),state:$("botStormState").value,resource:$("botStormResource").value});runBotSearch($("botStormLoad"),$("botStormResult"),"/api/bot/storms/isles?"+q.toString())};
+$("botStormAvailableTab").onclick=()=>{$("botStormState").value="3";$("botStormOccupier").value="";$("botStormResource").value="0";$("botStormLoad").click();$("botStormAvailableTab").classList.add("primary")};
 $("botStormFortsLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"500",availability:$("botStormAvailability").value,min_attacks:$("botStormMinAttacks").value,levels:[...document.querySelectorAll(".stormLevel:checked")].map(x=>x.value).join(",")});runBotSearch($("botStormFortsLoad"),$("botStormFortsResult"),"/api/bot/storms/forts?"+q.toString())};
 $("botRadarLoad").dataset.label=$("botRadarLoad").textContent;
 $("botRadarLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",castle_type:$("botRadarCastleType").value,movement_type:$("botRadarMovementType").value});runBotSearch($("botRadarLoad"),$("botRadarResult"),"/api/bot/radar/movements?"+q.toString())};
