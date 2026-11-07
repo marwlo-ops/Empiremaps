@@ -36,6 +36,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
       <button data-view="fortress"><span class="sym">⌖</span>Historia fortec</button>
       <button data-view="server"><span class="sym">▦</span>Statystyki serwera</button>
       <button data-view="map"><span class="sym">◈</span>Mapa i radar</button>
+      <button data-view="movement-review"><span class="sym">⇄</span>Przegląd ruchów</button>
       <button data-view="ptaki"><span class="sym">🐦</span>Ptaki</button>
       <button data-view="mapa"><span class="sym">🗺</span>Mapa sojuszy</button>
       <button data-view="events"><span class="sym">◷</span>Wydarzenia</button>
@@ -128,6 +129,19 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
           <div class="result" id="botCastleResult"></div>
         </div>
         <div class="notice warn" style="margin-top:16px">Status: radar pobiera dane z API po ręcznym odświeżeniu. Automatyczne monitorowanie w tle i powiadomienia nie są jeszcze aktywne.</div></section>
+      <section class="view" id="view-movement-review">
+        <div class="welcome"><div><div class="eyebrow">TAKTYKA • RUCHY WOJSK</div><h1>Przegląd ruchów</h1><p>Ataki i wsparcia graczy z RB, MD oraz Pijaków Albionu.</p></div></div>
+        <div class="panel">
+          <div class="searchrow">
+            <select class="field" id="movementReviewType"><option value="3">Ataki</option><option value="1">Wsparcie</option></select>
+            <select class="field" id="movementReviewAlliance"><option value="">Wszystkie trzy sojusze</option><option value="RB">RB</option><option value="MD">MD</option><option value="Pijaki Albionu">Pijaki Albionu</option></select>
+            <select class="field" id="movementReviewPlayer" disabled><option value="">Wszyscy gracze wybranego sojuszu</option></select>
+            <button class="btn primary" id="movementReviewLoad">Pobierz ruchy</button>
+          </div>
+          <div class="notice" id="movementReviewStatus">Wybierz rodzaj ruchu i sojusz. Lista graczy zostanie pobrana z indeksu serwera E4K PL1 BETA.</div>
+          <div class="result" id="movementReviewResult"></div>
+        </div>
+      </section>
       <section class="view" id="view-ptaki">
         <div class="welcome"><div><div class="eyebrow">OCHRONA GRACZY — DOVE</div><h1>🐦 Ptaki (Dove)</h1><p>Aktywna ochrona graczy ze wszystkich sojuszy serwera E4K PL1 BETA wraz z dokładnym terminem jej zakończenia.</p></div></div>
         <div class="panel"><div class="panel-title"><h2>Aktywne ochrony na całym serwerze</h2><span class="sub">Wszystkie sojusze</span></div>
@@ -280,6 +294,33 @@ $("botFortressLoad").onclick=()=>{const q=new URLSearchParams({server:$("server"
 $("botStormLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"500",occupier:$("botStormOccupier").value.trim(),state:$("botStormState").value,resource:$("botStormResource").value});runBotSearch($("botStormLoad"),$("botStormResult"),"/api/bot/storms/isles?"+q.toString())};
 $("botStormAvailableTab").onclick=()=>{$("botStormState").value="3";$("botStormOccupier").value="";$("botStormResource").value="0";$("botStormLoad").click();$("botStormAvailableTab").classList.add("primary")};
 $("botStormFortsLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"500",availability:$("botStormAvailability").value,min_attacks:$("botStormMinAttacks").value,levels:[...document.querySelectorAll(".stormLevel:checked")].map(x=>x.value).join(",")});runBotSearch($("botStormFortsLoad"),$("botStormFortsResult"),"/api/bot/storms/forts?"+q.toString())};
+
+async function loadMovementReviewPlayers(){
+  const alliance=$("movementReviewAlliance").value, playerSelect=$("movementReviewPlayer");
+  playerSelect.innerHTML='<option value="">Wszyscy gracze wybranego sojuszu</option>';
+  playerSelect.disabled=!alliance;
+  if(!alliance){$("movementReviewStatus").textContent="Wybierz jeden sojusz, aby wyświetlić listę jego graczy.";return;}
+  $("movementReviewStatus").textContent="Pobieranie listy graczy sojuszu…";
+  try{
+    const data=await api("/api/bot/movement-review/players?server="+server()+"&alliance="+encodeURIComponent(alliance));
+    (data.items||[]).forEach(name=>{const option=document.createElement("option");option.value=name;option.textContent=name;playerSelect.appendChild(option)});
+    $("movementReviewStatus").textContent=data.ready?("Gracze w sojuszu: "+(data.count||0)+". Lista z indeksu serwera, aktualizacja skanu: "+(data.cached_at?new Date(data.cached_at*1000).toLocaleString("pl-PL"):"—")):(data.message||"Indeks graczy nie jest jeszcze gotowy.");
+  }catch(err){$("movementReviewStatus").textContent=err.message}
+}
+$("movementReviewAlliance").addEventListener("change",loadMovementReviewPlayers);
+$("movementReviewLoad").onclick=async()=>{
+  const btn=$("movementReviewLoad"),result=$("movementReviewResult"),label=btn.textContent;
+  btn.disabled=true;btn.textContent="Pobieranie…";
+  result.innerHTML='<div class="notice">Pobieranie ruchów z radaru…</div>';
+  const q=new URLSearchParams({server:server(),movement_type:$("movementReviewType").value,alliance:$("movementReviewAlliance").value,player:$("movementReviewPlayer").value});
+  try{
+    const data=await api("/api/bot/movement-review?"+q.toString());
+    result.innerHTML=renderBotPayload(data);
+    $("movementReviewStatus").textContent="Ruchy pobrane: "+(data.count??0)+". Szacowana liczba żołnierzy jest wyliczana tylko wtedy, gdy API zwraca moc ruchu.";
+  }catch(err){result.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>';$("movementReviewStatus").textContent="Nie udało się pobrać ruchów."}
+  finally{btn.disabled=false;btn.textContent=label}
+};
+
 $("botRadarLoad").dataset.label=$("botRadarLoad").textContent;
 $("botRadarLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",castle_type:$("botRadarCastleType").value,movement_type:$("botRadarMovementType").value});runBotSearch($("botRadarLoad"),$("botRadarResult"),"/api/bot/radar/movements?"+q.toString())};
 $("botCastleAnalysis").onclick=()=>{const id=$("botCastleId").value.trim();if(!id)return;const q=new URLSearchParams({server:$("server").value,kingdom_id:$("botKingdomId").value||"0"});runBotSearch($("botCastleAnalysis"),$("botCastleResult"),"/api/bot/castles/"+encodeURIComponent(id)+"/analysis?"+q.toString())};
