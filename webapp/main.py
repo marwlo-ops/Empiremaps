@@ -421,8 +421,21 @@ async def bot_suggestions(
             "scan_available": True, "scan_running": False, "message": None,
             "cached_at": cache["loaded"]}
 
+@app.get("/api/bot/doves/alliances")
+async def bot_dove_alliances(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
+        raise HTTPException(400, "Nieprawidłowy serwer.")
+    key = server.upper()
+    cache = BOT_SUGGEST_CACHE.get(key) or load_persisted_bot_index(key)
+    if cache:
+        BOT_SUGGEST_CACHE[key] = cache
+        return {"server": key, "items": cache.get("alliances", []), "count": len(cache.get("alliances", [])), "ready": True}
+    if key not in BOT_SCAN_TASKS:
+        BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
+    return {"server": key, "items": [], "count": 0, "ready": False, "message": "Trwa skanowanie sojuszy. Odśwież listę za chwilę."}
+
 @app.get("/api/bot/doves")
-async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, user: User = Depends(current_user)):
+async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, alliance: str = "", player: str = "", user: User = Depends(current_user)):
     """Aktywne okresy ochrony Dove ze wszystkich sojuszy serwera."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
         raise HTTPException(400, "Nieprawidłowy serwer.")
@@ -492,6 +505,12 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, user: U
             "peace_disabled_at": end.isoformat(),
             "might": row.get("might_current"),
         })
+    if alliance.strip():
+        wanted_alliance = alliance.strip().casefold()
+        items = [item for item in items if item["alliance"].casefold() == wanted_alliance]
+    if player.strip():
+        wanted_player = player.strip().casefold()
+        items = [item for item in items if wanted_player in item["player"].casefold()]
     items.sort(key=lambda item: item["peace_disabled_at"])
     return {"server": server.upper(), "items": items, "count": len(items),
             "pages_scanned": total_pages, "pages_available": total_value or total_pages,
