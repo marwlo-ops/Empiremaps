@@ -308,6 +308,34 @@ async def bot_player_statistics(player_id: int, server: str = "E4K_PL1_BETA", us
         raise HTTPException(400, "Nieprawidłowy identyfikator gracza.")
     return {"data": await bot_tracker_get(f"statistics/player/{player_id}", server), "server": server.upper()}
 
+
+@app.get("/api/bot/radar/movements")
+async def bot_radar_movements(
+    server: str = "E4K_PL1_BETA",
+    page: int = 1,
+    castle_type: int = 1,
+    movement_type: int = 3,
+    user: User = Depends(current_user),
+):
+    if page < 1 or page > 100 or castle_type < 0 or movement_type < 0:
+        raise HTTPException(400, "Nieprawidłowe filtry radaru.")
+    url = "https://api-beta.gge-tracker.com/api/v1/server/movements"
+    params = {"page": page, "castleType": castle_type, "movementType": movement_type}
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+            response = await client.get(url, headers=bot_headers(server), params=params)
+        if response.status_code == 404:
+            raise HTTPException(404, "Brak ruchów dla wybranego serwera.")
+        if response.status_code == 429:
+            raise HTTPException(429, "API radaru ograniczyło liczbę zapytań. Spróbuj później.")
+        if response.status_code >= 400:
+            raise HTTPException(502, f"API radaru zwróciło błąd {response.status_code}.")
+        return {"data": response.json(), "server": server.upper()}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502, "Nie udało się połączyć z API radaru.")
+
 @app.get("/api/features")
 def features(user: User = Depends(current_user)):
     return {
