@@ -28,8 +28,9 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-with engine.begin() as connection:
-    connection.execute(text('CREATE SCHEMA IF NOT EXISTS empiremaps'))
+if not DATABASE_URL.startswith("sqlite"):
+    with engine.begin() as connection:
+        connection.execute(text('CREATE SCHEMA IF NOT EXISTS empiremaps'))
 
 class Base(DeclarativeBase):
     pass
@@ -42,7 +43,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-Base.metadata.create_all(engine)
+Base.metadata.create_all(
+    engine.execution_options(schema_translate_map={"empiremaps": None})
+    if DATABASE_URL.startswith("sqlite") else engine
+)
 
 app = FastAPI(title="Empiremaps API", version="0.1.0", docs_url="/api/docs", redoc_url=None)
 SECRET = os.getenv("JWT_SECRET_KEY", "")
