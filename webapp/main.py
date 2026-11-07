@@ -238,6 +238,69 @@ async def bot_tracker_get(path: str, server: str, params: dict | None = None):
     except Exception:
         raise HTTPException(502, "Nie udało się połączyć z API GGE Tracker.")
 
+
+BOT_SUGGEST_CACHE: dict[str, dict] = {}
+
+@app.get("/api/bot/suggestions")
+async def bot_suggestions(
+    q: str = "",
+    kind: str = "players",
+    server: str = "E4K_PL1_BETA",
+    user: User = Depends(current_user),
+):
+    if kind not in ("players", "alliances"):
+        raise HTTPException(400, "Nieprawidłowy typ podpowiedzi.")
+    if len(q) > 80:
+        raise HTTPException(400, "Fraza jest zbyt długa.")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
+        raise HTTPException(400, "Nieprawidłowy serwer.")
+    key = server.upper()
+    cache = BOT_SUGGEST_CACHE.get(key)
+    now = time.time()
+    if not cache or now - cache["loaded"] > 300:
+        players_data = {}
+        scan_root = ROOT / "data" / "server_scans" / key
+        try:
+            scan_files = list(scan_root.rglob("server_*.json"))
+            if scan_files:
+                latest = max(scan_files, key=lambda p: p.stat().st_mtime)
+                with latest.open(encoding="utf-8") as file:
+                    raw = json.load(file)
+                players_data = raw.get("players", {}) if isinstance(raw, dict) else {}
+        except (OSError, ValueError, TypeError):
+            players_data = {}
+        alliances = set()
+        for name, info in players_data.items():
+            if not isinstance(info, dict):
+                continue
+            alliance_name = info.get("alliance") or info.get("alliance_name")
+            if isinstance(alliance_name, dict):
+                alliance_name = alliance_name.get("name")
+            if alliance_name and str(alliance_name).strip() and str(alliance_name).lower() != "sans alliance":
+                alliances.add(str(alliance_name).strip())
+        cache = {
+            "loaded": now,
+            "players": [str(name) for name in players_data.keys() if str(name).strip()],
+            "alliances": sorted(alliances, key=str.casefold),
+            "scan_available": bool(players_data),
+        }
+        BOT_SUGGEST_CACHE[key] = cache
+    needle = q.casefold().strip()
+    values = cache[kind]
+    if needle:
+        values = [name for name in values if needle in name.casefold()]
+        values.sort(key=lambda name: (not name.casefold().startswith(needle), name.casefold()))
+    else:
+        values = values[:25]
+    return {
+        "items": values[:25],
+        "kind": kind,
+        "server": key,
+        "source": "server_scan",
+        "scan_available": cache["scan_available"],
+        "message": None if cache["scan_available"] else "Brak skanu tego serwera. Podpowiedzi pojawią się po pobraniu danych serwera.",
+    }
+
 @app.get("/api/bot/fortresses/meta")
 async def bot_fortress_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
     return {"data": await bot_tracker_get("dungeons/meta", server), "server": server.upper()}
