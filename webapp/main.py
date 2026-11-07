@@ -15,7 +15,7 @@ from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
-from sqlalchemy import create_engine, String, DateTime, Integer, select, text
+from sqlalchemy import create_engine, String, DateTime, Integer, Float, Text, select, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -46,6 +46,13 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+class BotPlayerIndex(Base):
+    __tablename__ = "bot_player_index"
+    __table_args__ = {"schema": None} if DATABASE_URL.startswith("sqlite") else {"schema": "empiremaps"}
+    server: Mapped[str] = mapped_column(String(40), primary_key=True)
+    payload: Mapped[str] = mapped_column(Text)
+    loaded_at: Mapped[float] = mapped_column(Float)
 
 Base.metadata.create_all(engine)
 
@@ -244,6 +251,38 @@ BOT_SUGGEST_CACHE: dict[str, dict] = {}
 BOT_SCAN_STATUS: dict[str, dict] = {}
 BOT_SCAN_TASKS: dict[str, asyncio.Task] = {}
 
+def load_persisted_bot_index(server: str):
+    key = server.upper()
+    try:
+        with SessionLocal() as db:
+            row = db.get(BotPlayerIndex, key)
+            if not row:
+                return None
+            payload = json.loads(row.payload)
+            if not isinstance(payload, dict) or not isinstance(payload.get("players"), list) or not isinstance(payload.get("alliances"), list):
+                return None
+            payload["loaded"] = float(row.loaded_at)
+            return payload
+    except Exception:
+        logging.exception("Nie udało się odczytać trwałego indeksu graczy %s", key)
+        return None
+
+def save_persisted_bot_index(server: str, payload: dict):
+    key = server.upper()
+    try:
+        with SessionLocal() as db:
+            row = db.get(BotPlayerIndex, key)
+            serialized = json.dumps({k: v for k, v in payload.items() if k != "loaded"}, ensure_ascii=False)
+            if row:
+                row.payload = serialized
+                row.loaded_at = float(payload["loaded"])
+            else:
+                db.add(BotPlayerIndex(server=key, payload=serialized, loaded_at=float(payload["loaded"])))
+            db.commit()
+    except Exception:
+        logging.exception("Nie udało się zapisać trwałego indeksu graczy %s", key)
+
+
 async def _scan_server_for_suggestions(server: str):
     """Pobiera indeks nazw graczy/sojuszy z paginowanego API; bez zależności od Discorda."""
     key = server.upper()
@@ -311,6 +350,7 @@ async def _scan_server_for_suggestions(server: str):
             "alliances": alliances, "scan_available": bool(players),
             "player_count": len(players), "page_count": total_pages,
         }
+        save_persisted_bot_index(key, BOT_SUGGEST_CACHE[key])
         status.update({"running": False, "finished_at": datetime.now(timezone.utc).isoformat(),
                        "players": len(players), "alliances": len(alliances), "pages": total_pages,
                        "pages_completed": total_pages, "total_pages": total_pages,
@@ -324,7 +364,11 @@ async def _scan_server_for_suggestions(server: str):
 @app.get("/api/bot/scan/status")
 def bot_scan_status(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
     key = server.upper()
-    cached = BOT_SUGGEST_CACHE.get(key, {})
+    cached = BOT_SUGGEST_CACHE.get(key)
+    if not cached:
+        cached = load_persisted_bot_index(key) or {}
+        if cached:
+            BOT_SUGGEST_CACHE[key] = cached
     return {"server": key, "scan": BOT_SCAN_STATUS.get(key, {"running": False}),
             "cached": bool(cached.get("scan_available")), "cached_at": cached.get("loaded"),
             "players": cached.get("player_count", 0), "alliances": len(cached.get("alliances", []))}
@@ -353,6 +397,10 @@ async def bot_suggestions(
         raise HTTPException(400, "Nieprawidłowy serwer.")
     key = server.upper()
     cache = BOT_SUGGEST_CACHE.get(key)
+    if not cache:
+        cache = load_persisted_bot_index(key)
+        if cache:
+            BOT_SUGGEST_CACHE[key] = cache
     if not cache or time.time() - cache["loaded"] > 21600:
         if key not in BOT_SCAN_TASKS:
             BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
