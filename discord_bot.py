@@ -1,0 +1,1526 @@
+import asyncio
+import hashlib
+import hmac
+import json
+import logging
+import os
+import socket
+import sys
+import traceback
+import xml.etree.ElementTree as ET
+from datetime import datetime, timedelta
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+
+import aiohttp
+import discord
+from aiohttp import web
+from discord.ext import commands, tasks
+
+import observability as obs
+from emojis import sync_and_load_emojis
+from utils import (
+    BOT_VERSION,
+    CONFIG_DIR,
+    DICT_EMOJIS,
+    JOUEURS_DIR,
+    MON_ID_DISCORD,
+    TOKEN,
+    TOPGG_TOKEN,
+    cache_mngr,
+    charger_langues,
+    get_api_headers,
+    get_server_config,
+    load_blocks_async,
+    load_maintenance,
+    t,
+)
+
+
+class RateLimitedSession(aiohttp.ClientSession):
+    """Wrapper global pour limiter la cadence des requêtes HTTP (Anti-Ban / SEC-04)."""
+
+    def __init__(self, limit=5, delay=0.3, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._semaphore = asyncio.Semaphore(limit)
+        self._delay = delay
+
+    async def _request(self, *args, **kwargs):
+        async with self._semaphore:
+            if self._delay > 0:
+                await asyncio.sleep(self._delay)
+            return await super()._request(*args, **kwargs)
+
+
+# =======================================
+# INITIALISATION DU BOT, OBS ET DES LOGS
+# =======================================
+os.makedirs("/app/logs/general", exist_ok=True)
+os.makedirs("/app/data", exist_ok=True)
+
+logger = logging.getLogger("GGE_Bot")
+logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter("%(asctime)s | [%(levelname)s] | %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+file_handler = TimedRotatingFileHandler(
+    "/app/logs/general/discord_bot.log", when="midnight", interval=1, backupCount=31, encoding="utf-8-sig"
+)
+
+
+def custom_log_namer(default_name):
+    return default_name.replace(".log.", "_") + ".log"
+
+
+file_handler.namer = custom_log_namer
+file_handler.setFormatter(formatter)
+logger.addHandler(file_handler)
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+logger.addHandler(console_handler)
+
+obs.setup(logger, bot_version=BOT_VERSION)
+
+# =======================================
+# DEMMARAGE ESTETHIQUE EN LOG
+# =======================================
+print(
+    "\n" + "█" * 60 + "\n" + "█" + " " * 18 + "NOUVEAU DÉMARRAGE DU BOT" + " " * 16 + "█\n" + "█" * 60 + "\n",
+    flush=True,
+)
+
+
+# =======================================
+# MESSAGE BIENVENUE/TUTOS AU NOUVEAUX SERVEURS
+# =======================================
+class WelcomeView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    def get_welcome_embed(self, lang="fr"):
+        title = t(lang, "welcome_title", defaut="{e_guides} Welcome to GGE Assistant!").format(**DICT_EMOJIS)
+        desc = t(lang, "welcome_desc", defaut="Here is how to get started:").format(**DICT_EMOJIS)
+
+        embed = discord.Embed(title=title, description=desc, color=0x0B1D51)
+
+        embed.add_field(
+            name=t(lang, "welcome_step1_title", defaut="{e_one} Configuration").format(**DICT_EMOJIS),
+            value=t(lang, "welcome_step1_desc", defaut="Use </setup:0> to configure your profile.").format(
+                **DICT_EMOJIS
+            ),
+            inline=False,
+        )
+        embed.add_field(
+            name=t(lang, "welcome_step2_title", defaut="{e_two} Tools").format(**DICT_EMOJIS),
+            value=t(lang, "welcome_step2_desc", defaut="Type </help:0> to see all commands.").format(**DICT_EMOJIS),
+            inline=False,
+        )
+        embed.add_field(
+            name=t(lang, "welcome_step3_title", defaut="{e_three} Server Setup").format(**DICT_EMOJIS),
+            value=t(
+                lang,
+                "welcome_step3_desc",
+                defaut="Use </server-setup:0> to interactively configure all your server alerts, channels, and pings in one place (Admins only).",
+            ).format(**DICT_EMOJIS),
+            inline=False,
+        )
+
+        embed.set_footer(text=t(lang, "welcome_footer", defaut="Select your language below.").format(**DICT_EMOJIS))
+        return embed
+
+    @discord.ui.button(
+        label="Français",
+        emoji=DICT_EMOJIS.get("e_flagfrench", "🇫🇷"),
+        style=discord.ButtonStyle.secondary,
+        custom_id="welc_fr",
+    )
+    async def btn_fr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=self.get_welcome_embed("fr"))
+
+    @discord.ui.button(
+        label="English",
+        emoji=DICT_EMOJIS.get("e_flagunitedkingdom", "🇬🇧"),
+        style=discord.ButtonStyle.secondary,
+        custom_id="welc_en",
+    )
+    async def btn_en(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=self.get_welcome_embed("en"))
+
+    @discord.ui.button(
+        label="Deutsch",
+        emoji=DICT_EMOJIS.get("e_flaggermany", "🇩🇪"),
+        style=discord.ButtonStyle.secondary,
+        custom_id="welc_de",
+    )
+    async def btn_de(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(embed=self.get_welcome_embed("de"))
+
+
+# =======================================
+# CLASSE PRINCIPALE
+# =======================================
+class GGEAssistantBot(commands.Bot):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.message_content = True
+        intents.members = True
+
+        super().__init__(command_prefix="!", intents=intents, help_command=None, chunk_guilds_at_startup=False)
+
+        self.maintenance_mode = load_maintenance()
+
+        self.tree.interaction_check = self.global_interaction_check
+        self.scan_flag_detected = False
+
+        self.status_index = 0
+        self.custom_status = None
+
+        self.tree.on_error = self.on_tree_error
+
+    # =======================================
+    # SETUP
+    # =======================================
+    async def setup_hook(self):
+
+        # =======================================
+        # VERIFICATION TOKEN TOPGG
+        # =======================================
+        if TOPGG_TOKEN and TOPGG_TOKEN != "FAUX_TOKEN":
+            self.topgg_token = TOPGG_TOKEN
+            logger.info("🟢 [Bot] Token Top.gg enregistré (utilisation via aiohttp v1).")
+        else:
+            self.topgg_token = None
+            logger.warning("⚠️ [Bot] Aucun token Top.gg détecté. Les requêtes de vote seront ignorées.")
+
+        # =======================================
+        # DEMMARAGE OBS
+        # =======================================
+        await obs.start(self)
+
+        # =======================================
+        # CONNEXION IPV4 ET RATE-LIMIT GLOBALE
+        # =======================================
+        connecteur_ipv4 = aiohttp.TCPConnector(family=socket.AF_INET)
+        self.session = RateLimitedSession(limit=20, delay=0.05, connector=connecteur_ipv4)
+
+        # =======================================
+        # CHARGEMENT DES COGS
+        # =======================================
+        logger.info("🔌 [Bot] Chargement des modules ...")
+        extensions = [
+            "cogs.admin",
+            "cogs.aide",
+            "cogs.alliances",
+            "cogs.calendrier",
+            "cogs.cible",
+            "cogs.classement",
+            "cogs.configuration",
+            "cogs.evenements",
+            "cogs.faille",
+            "cogs.forteresses",
+            "cogs.gge_hub_community",
+            "cogs.grand_tournoi",
+            "cogs.iles_orageuses",
+            "cogs.joueurs",
+            "cogs.offres",
+            "cogs.radar",
+            "cogs.roue_richesses",
+            "cogs.scan_serveurs",
+        ]
+        for ext in extensions:
+            try:
+                await self.load_extension(ext)
+                logger.info(f"✅ [Bot] Module {ext} chargé.")
+            except Exception as e:
+                logger.error(f"❌ [Bot] Erreur chargement module {ext} : {e}")
+
+        # =======================================
+        # INITIALISATION DES TASKS
+        # =======================================
+        await asyncio.sleep(5)
+        if not self.flag_watcher_task.is_running():
+            self.flag_watcher_task.start()
+            logger.info("🛰️ [Tasks] flag_watcher_task initialisée dans le setup_hook.")
+
+        if not self.status_task.is_running():
+            self.status_task.start()
+            logger.info("🛰️ [Tasks] status_task initialisée dans le setup_hook.")
+
+        if not self.sync_topgg_votes_task.is_running():
+            self.sync_topgg_votes_task.start()
+            logger.info("🛰️ [Tasks] sync_topgg_votes_task initialisée dans le setup_hook.")
+
+        if not self.post_server_count_task.is_running():
+            self.post_server_count_task.start()
+            logger.info("🛰️ [Tasks] post_server_count_task initialisée dans le setup_hook.")
+
+        if not self.update_servers_task.is_running():
+            self.update_servers_task.start()
+            logger.info("🛰️ [Tasks] update_special_servers_task initialisée dans le setup_hook.")
+
+        self.add_view(WelcomeView())
+
+        self.web_app = web.Application()
+        self.web_app.router.add_post("/dblwebhook", self.vote_handler)
+        self.web_runner = web.AppRunner(self.web_app)
+        await self.web_runner.setup()
+
+        self.web_site = web.TCPSite(self.web_runner, "0.0.0.0", 5011)
+        await self.web_site.start()
+        logger.info("🌐 [Webhook] Serveur web en écoute sur le port 5011.")
+
+        # =======================================
+        # Upload emojis
+        # =======================================
+        await sync_and_load_emojis(self, auto_upload=True)
+
+    # =======================================
+    # BOT PRÊT
+    # =======================================
+    async def on_ready(self):
+        charger_langues()
+        logger.info(f"✅ [Bot] Bot connecté en tant que {self.user} (ID: {self.user.id})")
+        logger.info("🟢 [Bot] Démarrage du système de logs...")
+
+        # ==========================================
+        # WEBHOOK START NOTIFICATION
+        # ==========================================
+        webhook_start = os.getenv("WEBHOOK_START")
+        if webhook_start and webhook_start.startswith("http"):
+            embed = discord.Embed(
+                title="🚀 Redémarrage Réussi",
+                description=f"Le bot est de nouveau en ligne et 100% opérationnel.\n**Version :** `{BOT_VERSION}`\n**Serveurs :** `{len(self.guilds)}`",
+                color=0x2ECC71,
+            )
+            try:
+                webhook = discord.Webhook.from_url(webhook_start, session=self.session)
+                self.loop.create_task(webhook.send(embed=embed, username="GGE Console 🟢"))
+            except Exception as e:
+                logger.error(f"❌ [Bot] Impossible d'envoyer le webhook de démarrage : {e}")
+
+        try:
+            path_fort = JOUEURS_DIR / "forteresses_sessions.json"
+            path_users = CONFIG_DIR / "users.json"
+
+            if path_fort.exists():
+                with open(path_fort, encoding="utf-8") as f:
+                    data_fort = json.load(f)
+                    sessions = data_fort.get("sessions", {})
+
+                if sessions:
+                    users_data = {}
+                    if path_users.exists():
+                        try:
+                            with open(path_users, encoding="utf-8") as f_u:
+                                users_data = json.load(f_u)
+                        except Exception:
+                            pass
+
+                    logger.info(f"🛑 [Redémarrage] Envoi du préavis de reprise à {len(sessions)} joueurs...")
+
+                    for uid in sessions.keys():
+                        try:
+                            user = self.get_user(int(uid)) or await self.fetch_user(int(uid))
+                            langue = users_data.get(uid, {}).get("langue", "fr")
+
+                            titre = t(langue, "bot_restart_notify_title", defaut="{e_refresh} Redémarrage système")
+                            desc = t(
+                                langue,
+                                "bot_restart_notify_desc",
+                                defaut=(
+                                    "{e_working} Une mise à jour ou une maintenance du système vient d'avoir lieu.\n\n"
+                                    "{e_icon_search} Votre radar de forteresses a repris automatiquement en arrière-plan.\n"
+                                    "{e_nocheck} Veuillez noter que les boutons interactifs (*Relancer / Vérifier*) de vos anciennes alertes ne sont désormais plus fonctionnels.\n\n"
+                                    "{e_check} *(Retour à la normale effectif)*"
+                                ),
+                            )
+
+                            embed = discord.Embed(title=titre, description=desc, color=discord.Color.orange())
+                            await user.send(embed=embed)
+                        except Exception:
+                            pass
+
+        except Exception as e:
+            logger.error(f"❌ [Bot] Erreur lors de l'envoi du préavis au démarrage : {e}")
+
+        # ==========================================
+        # VERIFICATION MAINTENANCE
+        # ==========================================
+        if self.maintenance_mode:
+            statut_maint = t("en", "bot_activity_maintenance", defaut="🚧 EN MAINTENANCE 🚧")
+            activity = discord.Activity(type=discord.ActivityType.watching, name=statut_maint)
+            target_status = discord.Status.dnd
+        else:
+            activity = discord.Activity(type=discord.ActivityType.watching, name="/setup ➔ /help")
+            target_status = discord.Status.online
+
+        if not self.is_closed():
+            await self.change_presence(activity=activity, status=target_status)
+        logger.info(f"📡 [Bot] Statut mis à jour : {activity.name} | Pastille : {target_status}")
+
+    # ==========================================
+    # NOUVEAU SERVEUR
+    # ==========================================
+    async def on_guild_join(self, guild: discord.Guild):
+        logger.info(
+            f"🎉 [NOUVEAU SERVEUR] Le bot a rejoint '{guild.name}' (ID: {guild.id}) | Membres : {guild.member_count}"
+        )
+
+        obs.record_guild_event("guild_join", guild=guild, guild_total=len(self.guilds))
+        obs.upsert_guild(guild=guild, is_active=1)
+
+        webhook_servers = os.getenv("WEBHOOK_JOIN")
+        if webhook_servers and webhook_servers.startswith("http"):
+            if guild.owner:
+                proprio = guild.owner.name
+            elif guild.owner_id:
+                try:
+                    owner_user = await self.fetch_user(guild.owner_id)
+                    proprio = owner_user.name
+                except Exception:
+                    proprio = f"ID: {guild.owner_id}"
+            else:
+                proprio = "Inconnu"
+
+            embed = discord.Embed(
+                title="🎉 Nouveau Serveur Rejoint !",
+                description=f"**Nom :** `{guild.name}`\n**ID :** `{guild.id}`\n**Membres :** `{guild.member_count}`\n**Propriétaire :** `{proprio}`",
+                color=0x2ECC71,
+            )
+            try:
+                webhook = discord.Webhook.from_url(webhook_servers, session=self.session)
+                await webhook.send(embed=embed, username="GGE Serveurs 📈")
+            except Exception as e:
+                logger.error(f"❌ [Bot] Erreur Webhook Join : {e}")
+
+        channel_to_send = guild.system_channel
+
+        def can_send_welcome(channel):
+            if not channel:
+                return False
+            perms = channel.permissions_for(guild.me)
+            return perms.view_channel and perms.send_messages and perms.embed_links
+
+        if not can_send_welcome(channel_to_send):
+            channel_to_send = None
+            for channel in guild.text_channels:
+                if can_send_welcome(channel):
+                    channel_to_send = channel
+                    break
+
+        if channel_to_send:
+            view = WelcomeView()
+            embed_initial = view.get_welcome_embed("en")
+            try:
+                await channel_to_send.send(embed=embed_initial, view=view)
+            except discord.Forbidden:
+                logger.warning(f"🔇 [Bot] Message de bienvenue bloqué par les paramètres du serveur '{guild.name}'.")
+            except Exception as e:
+                logger.error(f"❌ [Bot] Erreur inattendue du message de bienvenue sur {guild.name} : {e}")
+                self.loop.create_task(
+                    self._send_background_error(
+                        "🐛 Crash Inattendu (Bienvenue)",
+                        f"Crash lors du message de bienvenue sur **{guild.name}**.\nErreur : `{e}`",
+                    )
+                )
+
+    # ==========================================
+    # SERVEUR SUPPRIME
+    # ==========================================
+    async def on_guild_remove(self, guild: discord.Guild):
+        logger.info(f"👋 [DÉPART SERVEUR] Le bot a été retiré de '{guild.name}' (ID: {guild.id})")
+
+        obs.record_guild_event("guild_leave", guild=guild, guild_total=len(self.guilds))
+        obs.upsert_guild(guild=guild, is_active=0, left_at=obs.ch_datetime())
+
+        webhook_servers = os.getenv("WEBHOOK_LEAVE")
+        if webhook_servers and webhook_servers.startswith("http"):
+            embed = discord.Embed(
+                title="👋 Serveur Quitté",
+                description=f"**Nom :** `{guild.name}`\n**ID :** `{guild.id}`\n**Membres perdus :** `{guild.member_count}`",
+                color=0xE74C3C,
+            )
+            try:
+                webhook = discord.Webhook.from_url(webhook_servers, session=self.session)
+                await webhook.send(embed=embed, username="GGE Serveurs 📉")
+            except Exception as e:
+                logger.error(f"❌ [Bot] Erreur Webhook Leave : {e}")
+
+    # ==========================================
+    # VERIFICATION SI SCAN EN COURS
+    # ==========================================
+    @tasks.loop(seconds=15)
+    async def flag_watcher_task(self):
+        obs.set_task_name("flag_watcher_task")
+        try:
+            flag_path = Path("/app/data/scan.flag")
+
+            if flag_path.exists():
+                if not self.scan_flag_detected:
+                    logger.debug(
+                        "⚡ [Watcher] Fichier scan.flag détecté. Un scan global du serveur est en cours d'exécution..."
+                    )
+                    self.scan_flag_detected = True
+            else:
+                if self.scan_flag_detected:
+                    logger.info(
+                        "🔄 [Watcher] Fichier scan.flag effacé ! Fin des écritures détectée. Actualisation de la RAM..."
+                    )
+                    self.scan_flag_detected = False
+                    try:
+                        for srv in cache_mngr.server_data:
+                            cache_mngr.server_data[srv]["last_refresh"] = 0
+                        logger.debug("✅ [Watcher] Le cache mémoire sera réactualisé à la prochaine commande.")
+                    except Exception as e:
+                        logger.error(f"❌ [Watcher] Échec actualisation RAM : {e}")
+        except Exception as e:
+            logger.error(f"❌ [Watcher] Erreur globale flag watcher : {e}")
+            obs.record_error(source="task", scope="flag_watcher_task", exception=e, cog="core")
+
+    # ==========================================
+    # LOOP DE STATUS DU BOT
+    # ==========================================
+    @tasks.loop(seconds=20)
+    async def status_task(self):
+        obs.set_task_name("status_task")
+        try:
+            if self.maintenance_mode:
+                statut_maint = t("fr", "bot_activity_maintenance", defaut="🚧 EN MAINTENANCE 🚧")
+                activity = discord.Activity(type=discord.ActivityType.watching, name=statut_maint)
+                if not self.is_closed():
+                    await self.change_presence(activity=activity, status=discord.Status.dnd)
+                return
+
+            nb_serveurs = len(self.guilds)
+            nb_membres = sum(guild.member_count for guild in self.guilds if guild.member_count)
+
+            def compter_serveurs_gge():
+                dossier_serveurs = Path("/app/data/server_scans")
+                if dossier_serveurs.exists():
+                    return sum(1 for d in dossier_serveurs.iterdir() if d.is_dir())
+                return 0
+
+            nb_gge_serveurs = await asyncio.to_thread(compter_serveurs_gge)
+
+            statuts = [
+                discord.Activity(type=discord.ActivityType.listening, name="⚙️ /setup | Start here"),
+                discord.Activity(type=discord.ActivityType.watching, name="📖 /help | All commands"),
+                discord.Activity(
+                    type=discord.ActivityType.watching, name=f"🌍 {nb_serveurs} servers | 👥 {nb_membres} users"
+                ),
+                discord.Activity(type=discord.ActivityType.competing, name=f"⚔️ {nb_gge_serveurs} GGE servers"),
+                discord.Activity(type=discord.ActivityType.playing, name=f"🚀 {BOT_VERSION}"),
+            ]
+
+            if self.custom_status:
+                statuts.append(discord.Activity(type=discord.ActivityType.playing, name=self.custom_status))
+
+            activity = statuts[self.status_index % len(statuts)]
+            self.status_index += 1
+
+            if not self.is_closed():
+                await self.change_presence(activity=activity, status=discord.Status.online)
+        except Exception as e:
+            logger.error(f"❌ [Bot] Erreur status_task : {e}")
+            obs.record_error(source="task", scope="status_task", exception=e, cog="core")
+
+    @status_task.before_loop
+    async def before_status_task(self):
+        await self.wait_until_ready()
+
+    # ==========================================
+    # WEBHOOK TOPGG
+    # ==========================================
+    async def vote_handler(self, request):
+        secret = os.getenv("TOPGG_WEBHOOK_SECRET")
+
+        if not secret:
+            logger.error("❌ [Webhook] TOPGG_WEBHOOK_SECRET non configuré — requête refusée.")
+            obs.record_vote(accepted=False, reject_reason="secret_not_configured", signature_version="none")
+            return web.Response(status=503, text="Webhook not configured")
+
+        signature_header = request.headers.get("x-topgg-signature")
+
+        try:
+            raw_body = await request.text()
+        except Exception as e:
+            logger.error(f"❌ [Webhook] Impossible de lire le payload : {e}")
+            obs.record_error(source="webhook", scope="topgg_body", exception=e, cog="core")
+            return web.Response(status=400, text="Unreadable body")
+
+        if signature_header:
+            try:
+                parts = dict(part.split("=") for part in signature_header.split(","))
+                message = f"{parts.get('t')}.{raw_body}".encode()
+                expected_sig = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+                if not hmac.compare_digest(expected_sig, parts.get("v1")):
+                    logger.warning("❌ [Webhook] Signature v1 invalide.")
+                    obs.record_vote(accepted=False, reject_reason="bad_signature_v1", signature_version="v1")
+                    return web.Response(status=401, text="Signature invalide")
+            except Exception as e:
+                logger.error(f"❌ [Webhook] Erreur calcul signature v1 : {e}")
+                obs.record_error(source="webhook", scope="topgg_sig", exception=e, cog="core")
+                obs.record_vote(accepted=False, reject_reason="invalid_signature_format", signature_version="v1")
+                return web.Response(status=400, text="Erreur de calcul v1")
+
+        else:
+            logger.warning(f"❌ [Webhook] Requête refusée (absence de signature v1). Headers : {request.headers}")
+            obs.record_vote(accepted=False, reject_reason="missing_auth", signature_version="none")
+            return web.Response(status=401, text="Missing auth")
+
+        try:
+            payload = json.loads(raw_body)
+        except Exception:
+            logger.error("❌ [Webhook] JSON invalide.")
+            obs.record_vote(
+                accepted=False, reject_reason="invalid_json", signature_version="v1" if signature_header else "v0"
+            )
+            return web.Response(status=400, text="Invalid JSON")
+
+        if "data" in payload:
+            user_id = payload.get("data", {}).get("user", {}).get("platform_id")
+            event_type = payload.get("type")
+        else:
+            user_id = payload.get("user")
+            event_type = payload.get("type")
+
+        if not user_id:
+            logger.error(f"❌ [Webhook] Impossible de lire l'ID dans le payload : {payload}")
+            obs.record_vote(
+                accepted=False,
+                reject_reason="missing_user_id",
+                event_type=str(event_type or ""),
+                signature_version="v1" if signature_header else "v0",
+            )
+            return web.Response(status=400, text="Missing user ID")
+
+        webhook_votes = os.getenv("WEBHOOK_VOTES")
+
+        obs.record_vote(
+            user_id=int(user_id) if str(user_id).isdigit() else 0,
+            source="webhook",
+            event_type=str(event_type or "upvote"),
+            accepted=True,
+            signature_version="v1" if signature_header else "v0",
+            shield_until=datetime.now() + timedelta(days=7),
+        )
+
+        if event_type in ["test", "webhook.test"]:
+            logger.info(f"✅ [Webhook] TEST RÉUSSI ! La liaison avec Top.gg est parfaite (Test par {user_id}).")
+        else:
+            logger.info(f"✅ [Webhook] Vrai vote reçu ! Application du bouclier pour {user_id}.")
+
+            if webhook_votes and webhook_votes.startswith("http"):
+                payload = {
+                    "username": "GGE Top.gg 🏆",
+                    "embeds": [
+                        {
+                            "title": "🌟 Nouveau Vote reçu !",
+                            "description": f"Un joueur (ID: `<@{user_id}>`) vient de voter pour le bot sur Top.gg !\nSon bouclier anti-pubs est activé pour 7 jours.",
+                            "color": 0xFFD700,
+                        }
+                    ],
+                }
+                try:
+                    self.loop.create_task(self.session.post(webhook_votes, json=payload))
+                except Exception as e:
+                    logger.warning(f"⚠️ [Webhook] Impossible d'envoyer la notification de vote admin : {e}")
+
+        VOTES_FILE = JOUEURS_DIR / "votes.json"
+        votes_data = {}
+        if VOTES_FILE.exists():
+            try:
+                with open(VOTES_FILE, encoding="utf-8") as f:
+                    votes_data = json.load(f)
+            except Exception:
+                pass
+
+        now = datetime.now()
+        votes_data[str(user_id)] = (now + timedelta(days=7)).isoformat()
+
+        try:
+            with open(VOTES_FILE, "w", encoding="utf-8") as f:
+                json.dump(votes_data, f, indent=4)
+        except Exception as e:
+            logger.error(f"❌ [Webhook] Erreur lors de la sauvegarde : {e}")
+            obs.record_error(source="webhook", scope="topgg_save", exception=e, cog="core")
+
+        try:
+            user = self.get_user(int(user_id)) or await self.fetch_user(int(user_id))
+            if user:
+                from utils import cache_mngr
+
+                langue = "en"
+
+                user_data = None
+                if cache_mngr.users_config is not None:
+                    user_data = cache_mngr.users_config.get(str(user_id))
+
+                if user_data and isinstance(user_data, dict):
+                    langue = user_data.get("lang", user_data.get("langue", "en"))
+
+                titre_defaut = "🎉 Thank you for your support!"
+                desc_defaut = (
+                    "Your vote on Top.gg has been successfully recorded.\n\n"
+                    "🛡️ **Your shield is now active!**\n"
+                    "You won't see any vote requests on radar commands for the next **7 days**.\n\n"
+                    "Happy gaming! ⚔️"
+                )
+
+                titre = t(langue, "vote_thanks_title", defaut=titre_defaut)
+                description = t(langue, "vote_thanks_desc", defaut=desc_defaut)
+
+                embed = discord.Embed(title=titre, description=description, color=discord.Color.brand_green())
+                await user.send(embed=embed)
+        except Exception as e:
+            logger.error(f"❌ [Webhook] Erreur envoi DM remerciement : {e}")
+            pass
+
+        return web.Response(status=200, text="OK")
+
+    # ==========================================
+    # SYNCHRONISATION VOTES
+    # ==========================================
+    @tasks.loop(hours=12)
+    async def sync_topgg_votes_task(self):
+        obs.set_task_name("sync_topgg_votes_task")
+        try:
+            VOTES_FILE = JOUEURS_DIR / "votes.json"
+
+            if not getattr(self, "topgg_token", None):
+                return
+
+            headers = {"Authorization": f"Bearer {self.topgg_token}"}
+            url = f"https://top.gg/api/bots/{self.user.id}/votes"
+
+            recent_voters_ids = []
+            try:
+                async with self.session.get(url, headers=headers, timeout=10) as r:
+                    if r.status != 200:
+                        err_txt = await r.text()
+                        logger.error(f"❌ [Top.gg] Erreur API ({r.status}) : {err_txt}")
+                        return
+
+                    raw_voters = await r.json()
+
+                    for v in raw_voters:
+                        if isinstance(v, dict):
+                            recent_voters_ids.append(str(v.get("id", "")))
+                        else:
+                            recent_voters_ids.append(str(v))
+
+                    recent_voters_ids = [uid for uid in recent_voters_ids if uid]
+
+            except Exception as e:
+                logger.error(f"❌ [Top.gg] Erreur de requête aiohttp : {e}")
+                obs.record_error(source="task", scope="sync_topgg_fetch", exception=e, cog="core")
+                return
+
+            votes_data = {}
+            if VOTES_FILE.exists():
+                try:
+                    with open(VOTES_FILE, encoding="utf-8") as f:
+                        votes_data = json.load(f)
+                except Exception:
+                    pass
+
+            now = datetime.now()
+            updated = False
+
+            keys_to_delete = []
+            for uid, deadline_iso in votes_data.items():
+                if datetime.fromisoformat(deadline_iso) < now:
+                    keys_to_delete.append(uid)
+
+            for uid in recent_voters_ids:
+                if uid not in votes_data or uid in keys_to_delete:
+                    votes_data[uid] = (now + timedelta(days=7)).isoformat()
+                    if uid in keys_to_delete:
+                        keys_to_delete.remove(uid)
+                    updated = True
+
+            for uid in keys_to_delete:
+                del votes_data[uid]
+                updated = True
+
+            if updated:
+                try:
+                    with open(VOTES_FILE, "w", encoding="utf-8") as f:
+                        json.dump(votes_data, f, indent=4)
+                    logger.info("✅ [Top.gg] Base des votes mise à jour via API v1 (Boucliers 7j attribués/nettoyés).")
+                except Exception as e:
+                    logger.error(f"❌ [Top.gg] Impossible de sauvegarder votes.json : {e}")
+        except Exception as e:
+            logger.error(f"❌ [Top.gg] Erreur globale sync_topgg_votes_task : {e}")
+            obs.record_error(source="task", scope="sync_topgg_votes_task", exception=e, cog="core")
+
+    @sync_topgg_votes_task.before_loop
+    async def before_sync_votes(self):
+        await self.wait_until_ready()
+
+    # ==========================================
+    # SYNCHRONISATION SERVEURS ET GGE-TRACKER
+    # ==========================================
+    @tasks.loop(hours=3)
+    async def update_servers_task(self):
+        obs.set_task_name("update_servers_task")
+
+        url = "https://api.gge-tracker.com/api/v1/servers/catalog"
+        webhook_url = os.getenv("WEBHOOK_SYNC")
+
+        headers = await get_api_headers()
+        headers["Accept"] = "text/xml,application/xml,application/xhtml+xml"
+        headers["User-Agent"] = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+
+        try:
+            async with self.session.get(url, headers=headers, timeout=10) as r:
+                if r.status == 200:
+                    xml_text = await r.text()
+                    root = ET.fromstring(xml_text)
+
+                    cache_file = CONFIG_DIR / "servers_cache.json"
+
+                    anciennes_infos = {}
+                    if cache_file.exists():
+                        with open(cache_file, encoding="utf-8") as f:
+                            anciennes_infos = json.load(f).get("servers_info", {})
+
+                    nouveau_servers_info = {}
+
+                    for server in root.findall(".//server"):
+                        name_elem = server.find("name")
+                        enabled_elem = server.find("enabled")
+                        storm_elem = server.find("storm")
+                        fortress_elem = server.find("fortress")
+                        advanced_castle_elem = server.find("advanced-castle")
+
+                        if name_elem is not None and name_elem.text:
+                            name = name_elem.text.strip()
+                            is_enabled = (
+                                (enabled_elem.text.strip().lower() == "true")
+                                if (enabled_elem is not None and enabled_elem.text)
+                                else False
+                            )
+                            is_storm = (
+                                (storm_elem.text.strip().lower() == "true")
+                                if (storm_elem is not None and storm_elem.text)
+                                else False
+                            )
+                            is_fortress = (
+                                (fortress_elem.text.strip().lower() == "true")
+                                if (fortress_elem is not None and fortress_elem.text)
+                                else False
+                            )
+                            is_advanced_castle = (
+                                (advanced_castle_elem.text.strip().lower() == "true")
+                                if (advanced_castle_elem is not None and advanced_castle_elem.text)
+                                else False
+                            )
+
+                            api_name = anciennes_infos.get(name, {}).get("api_name", name.lower().replace(" ", "_"))
+
+                            nouveau_servers_info[name] = {
+                                "enabled": is_enabled,
+                                "storm": is_storm,
+                                "fortress": is_fortress,
+                                "advanced_castle": is_advanced_castle,
+                                "api_name": api_name,
+                            }
+
+                    nouveaux_serveurs = []
+                    changements_features = []
+
+                    for name, new_data in nouveau_servers_info.items():
+                        if name not in anciennes_infos:
+                            nouveaux_serveurs.append(name)
+                        else:
+                            old_data = anciennes_infos[name]
+
+                        changed_flags = []
+                        if old_data.get("storm", False) != new_data["storm"]:
+                            etat = "✅ Activé" if new_data["storm"] else "❌ Désactivé"
+                            changed_flags.append(f"Storm: {etat}")
+
+                        if old_data.get("fortress", False) != new_data["fortress"]:
+                            etat = "✅ Activé" if new_data["fortress"] else "❌ Désactivé"
+                            changed_flags.append(f"Fortress: {etat}")
+
+                        if old_data.get("advanced_castle", False) != new_data["advanced_castle"]:
+                            etat = "✅ Activé" if new_data["advanced_castle"] else "❌ Désactivé"
+                            changed_flags.append(f"Advanced Castle: {etat}")
+
+                        if changed_flags:
+                            changements_features.append(f"• **{name}** ➔ " + " | ".join(changed_flags))
+
+                            # ==========================================
+                            # 🧹 NETTOYAGE DES ABONNEMENTS TEMPÊTES
+                            # ==========================================
+                            if old_data.get("storm", False) and not new_data["storm"]:
+                                try:
+                                    storm_file = Path("data/serveurs/storm_alerts.json")
+                                    if storm_file.exists():
+                                        with open(storm_file, encoding="utf-8") as fs:
+                                            storm_data = json.load(fs)
+
+                                        guilds_modified = False
+                                        guilds_to_remove = []
+
+                                        for gid, config in storm_data.get("guilds", {}).items():
+                                            if config.get("gge_server") == name:
+                                                guilds_to_remove.append((gid, config))
+
+                                        for gid, config in guilds_to_remove:
+                                            channel_id = config.get("channel_id")
+                                            langue_serveur = config.get("langue", "fr")
+
+                                            try:
+                                                channel = self.get_channel(channel_id) or await self.fetch_channel(
+                                                    channel_id
+                                                )
+                                                if channel:
+                                                    titre = t(
+                                                        langue_serveur,
+                                                        "bot_alert_module_disabled_title",
+                                                        defaut="⚠️ Fin des alertes Tempêtes",
+                                                    )
+                                                    desc = t(
+                                                        langue_serveur,
+                                                        "bot_alert_module_disabled_desc",
+                                                        server=name,
+                                                        defaut=f"Le serveur de jeu **{name}** ne gère plus les îles orageuses (ou a été désactivé par GGE-Tracker). Les alertes automatiques ont été désactivées pour ce salon.",
+                                                    )
+                                                    embed = discord.Embed(
+                                                        title=titre, description=desc, color=discord.Color.red()
+                                                    )
+                                                    self.loop.create_task(channel.send(embed=embed))
+                                            except Exception:
+                                                pass
+
+                                            del storm_data["guilds"][gid]
+                                            guilds_modified = True
+
+                                        if guilds_modified:
+                                            with open(storm_file, "w", encoding="utf-8") as fs:
+                                                json.dump(storm_data, fs, indent=4, ensure_ascii=False)
+                                            logger.info(
+                                                f"🧹 [XML Sync] Nettoyage : {len(guilds_to_remove)} serveurs Discord désabonnés du radar tempête pour {name}."
+                                            )
+                                except Exception as e:
+                                    logger.error(f"❌ [XML Sync] Erreur nettoyage tempêtes pour {name} : {e}")
+
+                            # ==========================================
+                            # 🧹 NETTOYAGE DES SESSIONS FORTERESSES
+                            # ==========================================
+                            if old_data.get("fortress", False) and not new_data["fortress"]:
+                                try:
+                                    fortress_file = JOUEURS_DIR / "forteresses_sessions.json"
+                                    if fortress_file.exists():
+                                        with open(fortress_file, encoding="utf-8") as fs:
+                                            fort_data = json.load(fs)
+
+                                        sessions_modified = False
+                                        users_to_remove = []
+
+                                        for uid, config in fort_data.get("sessions", {}).items():
+                                            srv = config.get("serveur") or config.get("gge_server")
+                                            if srv == name:
+                                                users_to_remove.append(uid)
+
+                                        for uid in users_to_remove:
+                                            try:
+                                                user = self.get_user(int(uid)) or await self.fetch_user(int(uid))
+                                                if user:
+                                                    titre = t(
+                                                        "fr",
+                                                        "bot_alert_fortress_disabled_title",
+                                                        defaut="⚠️ Fin du Radar Forteresses",
+                                                    )
+                                                    desc = t(
+                                                        "fr",
+                                                        "bot_alert_fortress_disabled_desc",
+                                                        server=name,
+                                                        defaut=f"Le serveur de jeu **{name}** ne gère plus les forteresses (ou a été désactivé par l'API).\nTon radar automatique vient d'être arrêté en arrière-plan.",
+                                                    )
+                                                    embed = discord.Embed(
+                                                        title=titre, description=desc, color=discord.Color.red()
+                                                    )
+                                                    self.loop.create_task(user.send(embed=embed))
+                                            except Exception:
+                                                pass
+
+                                            del fort_data["sessions"][uid]
+                                            sessions_modified = True
+
+                                        if sessions_modified:
+                                            with open(fortress_file, "w", encoding="utf-8") as fs:
+                                                json.dump(fort_data, fs, indent=4, ensure_ascii=False)
+                                            logger.info(
+                                                f"🧹 [XML Sync] Nettoyage : {len(users_to_remove)} sessions forteresses arrêtées pour {name}."
+                                            )
+                                except Exception as e:
+                                    logger.error(f"❌ [XML Sync] Erreur nettoyage forteresses pour {name} : {e}")
+
+                    with open(cache_file, "w", encoding="utf-8") as f:
+                        json.dump({"servers_info": nouveau_servers_info}, f, indent=4, ensure_ascii=False)
+
+                    logger.info(
+                        f"🔄 [XML Sync] Cache dynamique des serveurs mis à jour avec {len(nouveau_servers_info)} serveurs."
+                    )
+
+                    if nouveaux_serveurs or changements_features:
+                        desc_parts = ["Le catalogue GGE-Tracker a évolué :"]
+
+                        if nouveaux_serveurs:
+                            desc_parts.append(
+                                "\n🌍 **Nouveaux serveurs détectés :**\n"
+                                + "\n".join([f"• `{s}`" for s in nouveaux_serveurs])
+                            )
+
+                        if changements_features:
+                            desc_parts.append("\n⭐ **Changements de modules :**\n" + "\n".join(changements_features))
+
+                        payload = {
+                            "embeds": [
+                                {
+                                    "title": "🔄 Alerte Synchro GGE-Tracker",
+                                    "description": "\n".join(desc_parts),
+                                    "color": 3447003,
+                                    "timestamp": datetime.now().isoformat(),
+                                }
+                            ]
+                        }
+                        if webhook_url and webhook_url.startswith("http"):
+                            try:
+                                async with self.session.post(webhook_url, json=payload) as resp:
+                                    pass
+                            except Exception as webhook_err:
+                                logger.error(f"❌ [XML Sync] Erreur envoi webhook admin synchro : {webhook_err}")
+                else:
+                    err_txt = await r.text()
+                    logger.warning(
+                        f"⚠️ [XML Sync] Impossible d'accéder au XML (Erreur {r.status}). Réponse : {err_txt[:300]}"
+                    )
+        except Exception as e:
+            logger.error(f"❌ [XML Sync] Erreur lors de l'unification des serveurs : {e}", exc_info=True)
+            obs.record_error(source="task", scope="update_servers_task", exception=e, cog="core")
+
+    @update_servers_task.before_loop
+    async def before_update_servers(self):
+        await self.wait_until_ready()
+        await asyncio.sleep(3)
+
+    # ==========================================
+    # ENVOI NOMBRE SERVEUR A TOPGG
+    # ==========================================
+    @tasks.loop(minutes=30)
+    async def post_server_count_task(self):
+        obs.set_task_name("post_server_count_task")
+        try:
+            if not getattr(self, "topgg_token", None):
+                return
+
+            url = f"https://top.gg/api/bots/{self.user.id}/stats"
+            headers = {"Authorization": f"Bearer {self.topgg_token}"}
+            payload = {"server_count": len(self.guilds)}
+
+            async with self.session.post(url, headers=headers, json=payload, timeout=10) as r:
+                if r.status == 200:
+                    logger.info(f"📈 [Top.gg] Compteur de serveurs mis à jour : {len(self.guilds)} serveurs.")
+                else:
+                    logger.error(f"❌ [Top.gg] Échec de la mise à jour des stats ({r.status}).")
+        except Exception as e:
+            logger.error(f"❌ [Top.gg] Erreur réseau lors de la mise à jour des stats : {e}")
+            obs.record_error(source="task", scope="post_server_count_task", exception=e, cog="core")
+
+    @post_server_count_task.before_loop
+    async def before_post_stats(self):
+        await self.wait_until_ready()
+
+    # ==========================================
+    # WEBHOOK ALERT
+    # ==========================================
+    async def _send_system_alert(
+        self, interaction: discord.Interaction, titre: str, description: str, couleur: int = 0xFF0000
+    ):
+        """Alerte système attachée à une interaction utilisateur (ex: Spam, Logs de commandes)."""
+        webhook_url = os.getenv("WEBHOOK_SYSTEM")
+        if not webhook_url or webhook_url.startswith("https://discord.com/api/webhooks/TON/"):
+            return
+
+        embed = discord.Embed(title=titre, description=description, color=couleur)
+        embed.set_footer(text=f"Utilisateur : {interaction.user.name} ({interaction.user.id})")
+
+        try:
+            webhook = discord.Webhook.from_url(webhook_url, session=self.session)
+            await webhook.send(embed=embed, username="GGE Système 🚨")
+        except Exception as e:
+            logger.error(f"❌ [Bot] Erreur Webhook Système : {e}")
+            obs.record_error(source="background", scope="send_system_alert", exception=e, cog="core")
+
+    async def _send_background_error(self, titre: str, description: str):
+        """Alerte système indépendante (Crash Global, Erreur de tâche de fond, Permissions)."""
+        webhook_url = os.getenv("WEBHOOK_SYSTEM")
+        if not webhook_url or webhook_url.startswith("https://discord.com/api/webhooks/TON/"):
+            return
+
+        embed = discord.Embed(title=titre, description=description, color=0x8B0000)
+        embed.set_footer(text="GGE Assistant - Rapport de Crash Automatique")
+
+        try:
+            if not hasattr(self, "session") or self.session.closed:
+                async with aiohttp.ClientSession() as session:
+                    webhook = discord.Webhook.from_url(webhook_url, session=session)
+                    await webhook.send(embed=embed, username="GGE Crash Report 🐛")
+            else:
+                webhook = discord.Webhook.from_url(webhook_url, session=self.session)
+                await webhook.send(embed=embed, username="GGE Crash Report 🐛")
+        except Exception as e:
+            logger.error(f"❌ [Bot] Erreur critique du Webhook de Crash Background : {e}")
+
+    async def on_app_command_completion(self, interaction: discord.Interaction, command):
+        """Close the command_logs row opened by global_interaction_check"""
+        obs.complete_command(interaction, status="ok")
+
+    async def on_error(self, event_method: str, *args, **kwargs):
+        """Capture et signale automatiquement toutes les erreurs survenant dans un événement du bot."""
+        exc_type, exc_value, exc_traceback = sys.exc_info()
+        tb_str = "".join(traceback.format_exception(exc_type, exc_value, exc_traceback))
+
+        logger.error(f"❌ [Bot] Erreur globale dans l'événement '{event_method}':\n{tb_str}")
+
+        obs.record_error(
+            source="on_error",
+            scope=event_method,
+            exception=exc_value,
+            traceback_text=tb_str,
+            severity="critical",
+            notified=True,
+        )
+
+        tb_str_short = tb_str[-2000:] if len(tb_str) > 2000 else tb_str
+
+        self.loop.create_task(
+            self._send_background_error(
+                f"💥 Crash Événement : `{event_method}`",
+                f"Une erreur inattendue a fait planter un événement du bot.\n\n**Traceback :**\n```py\n{tb_str_short}\n```",
+            )
+        )
+
+    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+        """Le filet de sécurité #3 : Pour tes commandes d'administration classiques (!commande)."""
+
+        if isinstance(error, commands.CommandNotFound):
+            return
+
+        tb_str = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        tb_str_short = tb_str[-2000:] if len(tb_str) > 2000 else tb_str
+
+        logger.error(f"❌ [Bot] Crash sur la commande admin '!{ctx.command}':\n{tb_str}")
+
+        obs.record_error(
+            source="on_command_error",
+            scope=str(ctx.command),
+            exception=error,
+            traceback_text=tb_str,
+            command=str(ctx.command),
+            notified=True,
+            user_id=getattr(ctx.author, "id", 0) or 0,
+            guild_id=getattr(ctx.guild, "id", 0) or 0 if ctx.guild else 0,
+        )
+
+        self.loop.create_task(
+            self._send_background_error(
+                f"💥 Crash Commande Admin : `!{ctx.command}`",
+                f"**Exécuté par :** {ctx.author.mention}\n\n**Traceback :**\n```py\n{tb_str_short}\n```",
+            )
+        )
+
+    async def on_tree_error(self, interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
+        """Capture et signale automatiquement les plantages lors de l'exécution d'une commande Slash."""
+
+        try:
+            langue, _ = await get_server_config(interaction)
+        except Exception:
+            langue = "fr"
+
+        # ==========================================
+        # ⏳ GESTION DU COOLDOWN
+        # ==========================================
+        if isinstance(error, discord.app_commands.CommandOnCooldown):
+            retry_seconds = round(error.retry_after, 1)
+
+            msg = t(
+                langue,
+                "err_cooldown",
+                retry_seconds=retry_seconds,
+                defaut=f"⏳ **Attention, tu vas trop vite !** Tu dois patienter encore **{retry_seconds}s** avant de pouvoir réutiliser cette commande.",
+            )
+
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(msg, ephemeral=True)
+                else:
+                    await interaction.response.send_message(msg, ephemeral=True)
+            except Exception:
+                pass
+            return
+
+        # ==========================================
+        # 💥 ERREURS TECHNIQUES CLASSIQUES
+        # ==========================================
+        tb_str = "".join(traceback.format_exception(type(error), error, error.__traceback__))
+        tb_str_short = tb_str[-2000:] if len(tb_str) > 2000 else tb_str
+
+        cmd_name = interaction.command.name if interaction.command else "Inconnue"
+        serveur = interaction.guild.name if interaction.guild else "Message Privé"
+
+        logger.error(f"❌ [Bot] Crash sur la commande '/{cmd_name}':\n{tb_str}")
+
+        obs.record_error(
+            source="on_tree_error",
+            scope=cmd_name,
+            exception=error,
+            traceback_text=tb_str,
+            command=cmd_name,
+            notified=True,
+            user_id=getattr(interaction.user, "id", 0) or 0,
+            guild_id=getattr(interaction.guild, "id", 0) or 0 if interaction.guild else 0,
+        )
+        obs.complete_command(interaction, status="error", error=error)
+
+        self.loop.create_task(
+            self._send_background_error(
+                f"💥 Crash Commande : `/{cmd_name}`",
+                f"**Exécuté par :** {interaction.user.mention} (`{interaction.user.id}`)\n"
+                f"**Serveur :** {serveur}\n\n"
+                f"**Traceback :**\n```py\n{tb_str_short}\n```",
+            )
+        )
+
+        try:
+            msg = t(
+                langue,
+                "err_internal_crash",
+                defaut="⚠️ Aïe ! Une erreur interne a fait planter cette commande. Mon créateur vient de recevoir le rapport de crash et va corriger ça au plus vite.",
+            )
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+        except Exception:
+            pass
+
+    # ==========================================
+    # VIDEUR
+    # ==========================================
+    async def global_interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.type == discord.InteractionType.autocomplete:
+            return True
+
+        cmd_name = (
+            interaction.command.qualified_name if interaction.command else interaction.data.get("name", "inconnue")
+        )
+
+        is_mine = interaction.user.id == MON_ID_DISCORD
+        obs_ctx = obs.start_command(interaction, cmd_name, is_owner=is_mine)
+
+        if is_mine and getattr(self, "bypass_createur", True):
+            return True
+
+        langue, serveur = await get_server_config(interaction)
+        if obs_ctx is not None:
+            obs_ctx.lang, obs_ctx.gge_server = langue, serveur
+
+        import time
+
+        if not hasattr(self, "_spam_cache"):
+            self._spam_cache = {}
+
+        if interaction.user.id != MON_ID_DISCORD:
+            user_id = interaction.user.id
+            now = time.time()
+
+            self._spam_cache[user_id] = [t for t in self._spam_cache.get(user_id, []) if now - t < 10]
+            self._spam_cache[user_id].append(now)
+
+            if len(self._spam_cache[user_id]) > 6:
+                if len(self._spam_cache[user_id]) == 7:
+                    msg = t(langue, "err_spam", defaut="⚠️ Tu vas trop vite ! Patiente quelques secondes.")
+                    await interaction.response.send_message(msg, ephemeral=True)
+
+                    self.loop.create_task(
+                        self._send_system_alert(
+                            interaction,
+                            "⚠️ Alerte Spam",
+                            f"{interaction.user.mention} a lancé trop de commandes en moins de 10 secondes (`/{cmd_name}`).",
+                            0xFFA500,
+                        )
+                    )
+                obs.deny_command(obs_ctx, "spam_ratelimit")
+                return False
+
+        try:
+            if interaction.type == discord.InteractionType.application_command:
+                lieu = interaction.guild.name if interaction.guild else "Message Privé"
+                params = []
+
+                def extract_options(opts):
+                    for opt in opts:
+                        if opt.get("type") in (1, 2):
+                            extract_options(opt.get("options", []))
+                        elif "value" in opt:
+                            params.append(f"{opt.get('name')}: {opt.get('value')}")
+
+                extract_options(interaction.data.get("options", []))
+                options_txt = f" | ⚙️ [{', '.join(params)}]" if params else ""
+                logger.info(f"📝 [COMMANDE] {interaction.user.name} a lancé `/{cmd_name}` sur [{lieu}]{options_txt}")
+        except Exception as e:
+            logger.error(f"⚠️ [Bot] Erreur lors de l'écriture du log commande : {e}")
+            self.loop.create_task(
+                self._send_system_alert(
+                    interaction,
+                    "🐛 Erreur Console (Logs)",
+                    f"Impossible d'écrire le log pour `/{cmd_name}`.\n```py\n{e}\n```",
+                )
+            )
+
+        commandes_libres = ["setup", "help", "contact", "changelog"]
+
+        if cmd_name not in commandes_libres:
+            config_ok = False
+
+            from utils import cache_mngr
+
+            if cache_mngr.users_config and str(interaction.user.id) in cache_mngr.users_config:
+                config_ok = True
+
+            if not config_ok:
+                if interaction.type == discord.InteractionType.application_command:
+                    msg = t(
+                        langue,
+                        "bot_err_config_dm",
+                        defaut="{e_warning} **Hold on!**\nYou haven't set up your personal profile yet. Use the </setup:0> command to choose your server and language before using the bot.",
+                    )
+                    await interaction.response.send_message(msg, ephemeral=True)
+                obs.deny_command(obs_ctx, "no_user_config")
+                return False
+
+        # ====================================================
+        # VÉRIFICATION DYNAMIQUE DES CONTRAINTES DE COMMANDE
+        # ====================================================
+        is_server_only = False
+        is_private_only = False
+        required_module = None
+        is_admin_only = False
+
+        try:
+            from cogs.aide import HELP_CONFIG
+
+            best_match_len = 0
+            for categorie in HELP_CONFIG.values():
+                for cmd in categorie.get("commands", []):
+                    config_cmd_base = cmd["name"].split(" (")[0].replace("/", "").strip()
+
+                    if cmd_name.startswith(config_cmd_base):
+                        if len(config_cmd_base) > best_match_len:
+                            best_match_len = len(config_cmd_base)
+                            is_server_only = cmd.get("server_only", False)
+                            is_private_only = cmd.get("private_only", False)
+                            required_module = cmd.get("required_module", None)
+                            is_admin_only = cmd.get("admin_only", False)
+        except Exception as e:
+            logger.error(f"❌ [Bot] Erreur lors de la lecture de HELP_CONFIG : {e}")
+
+        # 1. Vérification : Messages Privés Uniquement
+        if interaction.guild and is_private_only:
+            if interaction.type == discord.InteractionType.application_command:
+                msg = t(
+                    langue,
+                    "err_dm_only",
+                    defaut="{e_error} Cette commande est uniquement utilisable en **Messages Privés**.",
+                )
+                await interaction.response.send_message(msg, ephemeral=True)
+            obs.deny_command(obs_ctx, "dm_only")
+            return False
+
+        # 2. Vérification : Serveurs Uniquement
+        if not interaction.guild and is_server_only:
+            if interaction.type == discord.InteractionType.application_command:
+                msg = t(
+                    langue,
+                    "err_guild_only",
+                    defaut="{e_error} Cette commande est uniquement utilisable sur des **Serveurs Discord**.",
+                )
+                await interaction.response.send_message(msg, ephemeral=True)
+            obs.deny_command(obs_ctx, "guild_only")
+            return False
+
+        # 3. Vérification : Permissions Administrateur
+        if interaction.guild and is_admin_only:
+            if not interaction.user.guild_permissions.manage_guild:
+                if interaction.type == discord.InteractionType.application_command:
+                    msg = t(
+                        langue,
+                        "err_admin_only",
+                        defaut="{e_error} Vous devez avoir la permission **Gérer le serveur** pour utiliser cette commande.",
+                    )
+                    await interaction.response.send_message(msg, ephemeral=True)
+                obs.deny_command(obs_ctx, "admin_only")
+                return False
+
+        # 4. Vérification : Modules Avancés (Storm, Fortress, Advanced Castle)
+        if required_module:
+            try:
+                import json
+
+                cache_file = CONFIG_DIR / "servers_cache.json"
+                is_module_active = False
+
+                if cache_file.exists():
+                    with open(cache_file, encoding="utf-8") as f:
+                        servers_info = json.load(f).get("servers_info", {})
+                        is_module_active = servers_info.get(serveur, {}).get(required_module, False)
+
+                if obs_ctx is not None:
+                    setattr(obs_ctx, f"server_module_{required_module}", bool(is_module_active))
+
+                if serveur and not is_module_active:
+                    if interaction.type == discord.InteractionType.application_command:
+                        nom_module_propre = required_module.replace("_", " ").title()
+                        msg = t(
+                            langue,
+                            f"err_unsupported_{required_module}",
+                            defaut=f"⚠️ La commande `/{cmd_name}` nécessite le module **{nom_module_propre}**, qui n'est pas activé sur le serveur **{serveur}**. Pour plus d'informations, rejoins notre serveur de support avec `/contact`.",
+                        )
+                        await interaction.response.send_message(msg, ephemeral=True)
+                    obs.deny_command(obs_ctx, f"missing_module_{required_module}")
+                    return False
+            except Exception as e:
+                logger.error(f"❌ [Bot] Erreur lors de la vérification du module {required_module} : {e}")
+                self.loop.create_task(
+                    self._send_system_alert(
+                        interaction,
+                        "🐛 Erreur Console (Vérification Serveur)",
+                        f"Impossible de valider le module '{required_module}' du serveur.\n```py\n{e}\n```",
+                    )
+                )
+
+        if self.maintenance_mode:
+            if interaction.type == discord.InteractionType.application_command:
+                msg = t(
+                    langue,
+                    "bot_err_maintenance",
+                    defaut="🚧 **En cours de maintenance !**\nMes gobelins travaillent pour réactiver l'ensemble des fonctionnalités au plus vite.",
+                )
+                await interaction.response.send_message(msg, ephemeral=True)
+            obs.deny_command(obs_ctx, "maintenance")
+            return False
+
+        blocks_data = await load_blocks_async()
+        global_cmds = blocks_data.get("global_commands", {})
+        blocked_users = blocks_data.get("blocked_users", {})
+
+        # Découpage du nom de la commande pour vérifier la hiérarchie
+        parts = cmd_name.split()
+
+        # 1. Vérification des bans globaux
+        for i in range(1, len(parts) + 1):
+            check_name = " ".join(parts[:i])
+            if check_name in global_cmds:
+                if interaction.type == discord.InteractionType.application_command:
+                    reason = global_cmds[check_name]
+                    msg = t(
+                        langue, "bot_err_cmd_blocked", reason=reason, defaut=f"⛔ **Commande désactivée** :\n> {reason}"
+                    )
+                    await interaction.response.send_message(msg, ephemeral=True)
+                obs.deny_command(obs_ctx, "command_blocked")
+                return False
+
+        # 2. Vérification des bans utilisateurs
+        user_id_str = str(interaction.user.id)
+        if user_id_str in blocked_users:
+            user_blocks = blocked_users[user_id_str]
+
+            # Ban total
+            if "ALL" in user_blocks:
+                if interaction.type == discord.InteractionType.application_command:
+                    reason = user_blocks["ALL"]
+                    msg = t(
+                        langue, "bot_err_user_blocked_all", reason=reason, defaut=f"🛑 **Accès refusé** :\n> {reason}"
+                    )
+                    await interaction.response.send_message(msg, ephemeral=True)
+
+                    self.loop.create_task(
+                        self._send_system_alert(
+                            interaction,
+                            "🛑 Intrusion bloquée (Ban ALL)",
+                            f"Un utilisateur banni a tenté de forcer le passage sur `/{cmd_name}`.\nRaison du ban : {reason}",
+                            0x8B0000,
+                        )
+                    )
+                obs.deny_command(obs_ctx, "user_banned_all")
+                return False
+
+            # Ban de commande spécifique
+            for i in range(1, len(parts) + 1):
+                check_name = " ".join(parts[:i])
+                if check_name in user_blocks:
+                    if interaction.type == discord.InteractionType.application_command:
+                        reason = user_blocks[check_name]
+                        msg = t(
+                            langue,
+                            "bot_err_user_blocked_cmd",
+                            reason=reason,
+                            defaut=f"🛑 **Accès restreint** :\n> {reason}",
+                        )
+                        await interaction.response.send_message(msg, ephemeral=True)
+
+                        self.loop.create_task(
+                            self._send_system_alert(
+                                interaction,
+                                "🛑 Intrusion bloquée (Ban Commande)",
+                                f"Un utilisateur a tenté d'utiliser la commande `/{cmd_name}` (bloquée par le parent `/{check_name}`).\nRaison du ban : {reason}",
+                                0x8B0000,
+                            )
+                        )
+                    obs.deny_command(obs_ctx, "user_banned_command")
+                    return False
+
+        return True
+
+    # ==========================================
+    # FERMETURE DES TACHES
+    # ==========================================
+    async def close(self):
+
+        if hasattr(self, "flag_watcher_task"):
+            self.flag_watcher_task.cancel()
+        if hasattr(self, "status_task"):
+            self.status_task.cancel()
+        if hasattr(self, "sync_topgg_votes_task"):
+            self.sync_topgg_votes_task.cancel()
+        if hasattr(self, "post_server_count_task"):
+            self.post_server_count_task.cancel()
+        if hasattr(self, "update_servers_task"):
+            self.update_servers_task.cancel()
+        if hasattr(self, "web_site"):
+            await self.web_site.stop()
+            await self.web_runner.cleanup()
+
+        session = getattr(self, "session", None)
+        if session:
+            await session.close()
+
+        await obs.stop()
+
+        await super().close()
+
+
+bot = GGEAssistantBot()
+
+
+if __name__ == "__main__":
+    bot.run(TOKEN)
