@@ -100,6 +100,8 @@
 │   ├── recorders.py
 │   └── runtime.py
 ├── site
+│   ├── icons
+│   │   └── empiremaps.svg
 │   ├── index.html
 │   ├── manifest.webmanifest
 │   ├── mapa-sojuszy.html
@@ -120,7 +122,7 @@
 ├── ruff.toml
 └── utils.py
 
-13 directories, 62 files
+14 directories, 63 files
 ```
 <!-- TREE-END -->
 *(This section is auto-updated via GitHub Actions)*
