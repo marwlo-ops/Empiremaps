@@ -618,7 +618,6 @@ installButton.onclick=async()=>{
   alert(standalone?"Empiremaps jest już zainstalowane.":"Aby zainstalować: otwórz menu Chrome ⋮ i wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”. Jeśli tej opcji nie ma, odśwież stronę i spróbuj ponownie.");
 };
 
-<script>
 /* Empiremaps global Polish/English interface */
 (()=>{
  const translations={
@@ -742,7 +741,6 @@ installButton.onclick=async()=>{
   observer.observe(document.body,{subtree:true,childList:true,characterData:true});
  }
 })();
-</script>
 
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=7",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
 </script>
