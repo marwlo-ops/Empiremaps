@@ -72,6 +72,21 @@
           <div class="metric"><span class="micon">♟</span><b>Analiza gracza</b><span>Statystyki i ranking</span></div>
         </div>
         <div class="panel" style="margin-bottom:16px">
+          <div class="panel-title"><h2>Radar celów — filtr zaawansowany</h2><span class="sub">PORT WIZARDU Z BOTA</span></div>
+          <div class="searchrow"><input class="field" id="targetOriginPlayer" placeholder="Gracz bazowy — od niego licz odległość" list="suggest-targetOriginPlayer"><input class="field" id="targetAllianceFilter" placeholder="Sojusz docelowy (opcjonalnie)" list="suggest-targetAllianceFilter"><button class="btn primary" id="targetRadarRun">Szukaj celów</button></div>
+          <details style="margin-top:12px"><summary style="cursor:pointer;padding:10px 0">Filtry zaawansowane: poziom, moc, odległość, honor, chwała, łup i ochrona</summary>
+            <div class="searchrow"><input class="field" type="number" id="targetLevelMin" placeholder="Poziom min. (-1 = dowolny)"><input class="field" type="number" id="targetLevelMax" placeholder="Poziom maks."></div>
+            <div class="searchrow"><input class="field" type="number" id="targetMightMin" placeholder="Moc min."><input class="field" type="number" id="targetMightMax" placeholder="Moc maks."></div>
+            <div class="searchrow"><input class="field" type="number" step="0.1" id="targetDistanceMin" placeholder="Odległość min."><input class="field" type="number" step="0.1" id="targetDistanceMax" placeholder="Odległość maks."></div>
+            <div class="searchrow"><input class="field" type="number" id="targetHonorMin" placeholder="Honor min."><input class="field" type="number" id="targetHonorMax" placeholder="Honor maks."></div>
+            <div class="searchrow"><input class="field" type="number" id="targetGloryMin" placeholder="Chwała min."><input class="field" type="number" id="targetGloryMax" placeholder="Chwała maks."></div>
+            <div class="searchrow"><input class="field" type="number" id="targetLootMin" placeholder="Łup min."><input class="field" type="number" id="targetLootMax" placeholder="Łup maks."></div>
+            <div class="searchrow"><select class="field" id="targetActivity"><option value="all">Aktywni i ruiny</option><option value="active">Tylko aktywni</option><option value="inactive">Tylko ruiny</option></select><input class="field" id="targetExcludedAlliances" placeholder="Wyklucz sojusze (po przecinku)"></div>
+            <div class="searchrow"><label><input type="checkbox" id="targetShowDoves"> Uwzględnij graczy pod ochroną</label><label><input type="checkbox" id="targetOnlyAlliance"> Wymagaj sojuszu</label></div>
+          </details>
+          <div class="result" id="targetRadarResult"><div class="notice">Wybierz gracza bazowego, aby obliczyć odległość do potencjalnych celów.</div></div>
+        </div>
+        <div class="panel" style="margin-bottom:16px">
           <div class="panel-title"><h2>Wyszukiwanie celów</h2><span class="sub">SILNIK GGE ASSISTANT</span></div>
           <div class="searchrow"><input class="field" id="botTargetName" placeholder="Nazwa gracza lub zamku" list="suggest-botTargetName"><button class="btn primary" id="botTargetSearch">Szukaj celu</button></div>
           <div class="result" id="botTargetResult"></div>
@@ -276,11 +291,33 @@ async function loadCalendar(view=calendarCurrentView,force=false){
 document.querySelectorAll("[data-calendar-view]").forEach(b=>b.onclick=()=>loadCalendar(b.dataset.calendarView));
 $("calendarRefresh").onclick=()=>loadCalendar(calendarCurrentView,true);
 
+
+const targetRadarNumberIds=["targetLevelMin","targetLevelMax","targetMightMin","targetMightMax","targetDistanceMin","targetDistanceMax","targetHonorMin","targetHonorMax","targetGloryMin","targetGloryMax","targetLootMin","targetLootMax"];
+$("targetRadarRun").onclick=async()=>{
+  const origin=$("targetOriginPlayer").value.trim(),btn=$("targetRadarRun"),out=$("targetRadarResult");
+  if(!origin){out.innerHTML='<div class="notice warn">Wpisz gracza bazowego.</div>';return;}
+  const query=new URLSearchParams({origin_player:origin,server:$("server").value,target_alliance:$("targetAllianceFilter").value.trim(),activity_filter:$("targetActivity").value,show_doves:String($("targetShowDoves").checked),only_with_alliance:String($("targetOnlyAlliance").checked),excluded_alliances:$("targetExcludedAlliances").value.trim()});
+  targetRadarNumberIds.forEach(id=>{const val=$(id).value.trim();query.set(({targetLevelMin:"level_min",targetLevelMax:"level_max",targetMightMin:"might_min",targetMightMax:"might_max",targetDistanceMin:"distance_min",targetDistanceMax:"distance_max",targetHonorMin:"honor_min",targetHonorMax:"honor_max",targetGloryMin:"glory_min",targetGloryMax:"glory_max",targetLootMin:"loot_min",targetLootMax:"loot_max"})[id],val||"-1")});
+  const label=btn.textContent;btn.disabled=true;btn.textContent="Skanowanie…";out.innerHTML='<div class="notice">Pobieranie graczy, zamków i obliczanie odległości. Może to potrwać dłużej przy dużej liczbie filtrów…</div>';
+  try{
+    const data=await api("/api/bot/targets/search?"+query.toString());
+    if(!data.results?.length){out.innerHTML='<div class="notice">Nie znaleziono celów spełniających filtry. Przeskanowano strony: '+esc((data.scanned_pages||[]).join(", "))+'</div>';return;}
+    const rows=data.results.map((p,i)=>({rank:i+1,gracz:p.name,sojusz:p.alliance||"—",poziom:p.absolute_level,moc:p.might,honor:p.honor,chwała:p.glory,łup:p.loot,odległość:p.distance,X:p.x,Y:p.y,ochrona:p.has_protection?"Tak":"Nie"}));
+    out.innerHTML='<div class="notice">Gracz bazowy: <b>'+esc(data.origin_player)+'</b> ('+esc(data.origin_coordinates.x)+', '+esc(data.origin_coordinates.y)+'). Znaleziono '+esc(data.valid_targets_found)+' celów; strony: '+esc(data.scanned_pages.join(", "))+'.'+(data.truncated?' Część serwera nie została przeskanowana.':'')+'</div>'+tableFromArray(rows);
+  }catch(err){out.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
+  finally{btn.disabled=false;btn.textContent=label}
+};
+$("targetOriginPlayer").addEventListener("keydown",e=>{if(e.key==="Enter")$("targetRadarRun").click()});
+attachSuggestions("targetOriginPlayer","players");
+attachSuggestions("targetAllianceFilter","alliances");
+
 </script>
 <datalist id="suggest-playerName"></datalist>
 <datalist id="suggest-allianceName"></datalist>
 <datalist id="suggest-botTargetName"></datalist>
 <datalist id="suggest-botProfilePlayer"></datalist>
+<datalist id="suggest-targetOriginPlayer"></datalist>
+<datalist id="suggest-targetAllianceFilter"></datalist>
 <datalist id="suggest-botFortressPlayer"></datalist>
 <datalist id="suggest-botStormOccupier"></datalist>
 </body></html>
