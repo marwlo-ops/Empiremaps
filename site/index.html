@@ -650,7 +650,7 @@ installButton.onclick=async()=>{
  "PONOWNA DOSTĘPNOŚĆ":"AVAILABLE AGAIN","Status":"Status","Nazwa":"Name","Poziom":"Level","Moc":"Power"
  };
  const attrs=["placeholder","title","aria-label"];
- const originalText=new WeakMap(),originalAttrs=new WeakMap();
+ const originalText=new WeakMap(),originalAttrs=new WeakMap(),translatedTextNodes=new WeakSet();
  let lang="pl",busy=false;
  const translateText=(v)=>translations[v.trim()]!==undefined?translations[v.trim()]:v;
  function walk(root){
@@ -658,7 +658,7 @@ installButton.onclick=async()=>{
    if(!originalText.has(root))originalText.set(root,root.nodeValue);
    const base=originalText.get(root);
    const next=lang==="en"?translateText(base):base;
-   if(root.nodeValue!==next)root.nodeValue=next;
+   if(root.nodeValue!==next){translatedTextNodes.add(root);root.nodeValue=next;}
    return;
   }
   if(root.nodeType!==Node.ELEMENT_NODE && root!==document)return;
@@ -682,8 +682,8 @@ installButton.onclick=async()=>{
   let stored="pl";try{stored=localStorage.getItem("empiremaps-language")||"pl"}catch{}
   selector.addEventListener("change",()=>applyLanguage(selector.value));
   applyLanguage(stored);
-  const observer=new MutationObserver(records=>{if(busy)return;busy=true;records.forEach(r=>{if(r.type==="childList")r.addedNodes.forEach(n=>walk(n));});busy=false;});
-  observer.observe(document.body,{subtree:true,childList:true});
+  const observer=new MutationObserver(records=>{if(busy)return;busy=true;records.forEach(r=>{if(r.type==="childList")r.addedNodes.forEach(n=>walk(n));else if(r.type==="characterData"){const node=r.target;if(translatedTextNodes.has(node)){translatedTextNodes.delete(node);return;}originalText.set(node,node.nodeValue);if(lang==="en")walk(node);}});busy=false;});
+  observer.observe(document.body,{subtree:true,childList:true,characterData:true});
  }
 })();
 </script>
