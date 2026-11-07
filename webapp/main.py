@@ -672,11 +672,17 @@ async def bot_target_search(
         elif activity_filter == "inactive":
             params["inactiveFilter"] = 1
         if level_min != -1:
-            params["minLevel"] = min(level_min, 70)
-            params["minLegendaryLevel"] = max(0, level_min - 70)
+            if level_min <= 70:
+                params["minLevel"] = level_min
+            else:
+                params["minLevel"] = 70
+                params["minLegendaryLevel"] = level_min - 70
         if level_max != -1:
-            params["maxLevel"] = min(level_max, 70)
-            params["maxLegendaryLevel"] = max(0, level_max - 70)
+            if level_max <= 70:
+                params["maxLevel"] = level_max
+            else:
+                params["maxLevel"] = 70
+                params["maxLegendaryLevel"] = level_max - 70
         if target_alliance.strip():
             params["alliance"] = target_alliance.strip()
 
