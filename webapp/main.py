@@ -143,8 +143,7 @@ SERVERS = ["PL1","PL2","INT1","DE1","FR1","E4K_PL1","E4K_PL1_BETA","E4K_FR1","E4
 def game_headers(server: str):
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
         raise HTTPException(400, "Nieprawidłowy identyfikator serwera.")
-    server_id = "EmpirefourkingdomsExGG2_3" if server.upper() == "E4K_PL1_BETA" else server.upper()
-    headers = {"Accept":"application/json","gge-server":server_id,"User-Agent":"Empiremaps-Web/0.1"}
+    headers = {"Accept":"application/json","gge-server":server.upper(),"User-Agent":"Empiremaps-Web/0.1"}
     key = os.getenv("GGETRACKER_API_KEY")
     if key:
         headers["X-Api-Key"] = key
@@ -209,7 +208,7 @@ def features(user: User = Depends(current_user)):
     return {
         "available": ["player_profile","alliance_profile","server_statistics","fortress_history"],
         "in_development": ["live_map","target_radar","fortress_scanner","storm_islands","event_calendar","rankings","web_notifications"],
-        "note": "Funkcje zewnętrzne wymagają доступności GGE Tracker i właściwego serwera."
+        "note": "Funkcje zewnętrzne wymagają dostępności GGE Tracker i prawidłowego serwera."
     }
 
 if SITE.exists():
