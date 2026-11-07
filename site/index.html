@@ -76,6 +76,11 @@
           <div class="searchrow"><input class="field" id="botTargetName" placeholder="Nazwa gracza lub zamku" list="suggest-botTargetName"><button class="btn primary" id="botTargetSearch">Szukaj celu</button></div>
           <div class="result" id="botTargetResult"></div>
         </div>
+        <div class="panel" style="margin-bottom:16px">
+          <div class="panel-title"><h2>Profil i statystyki gracza</h2><span class="sub">PROFIL • RANKING • STATYSTYKI</span></div>
+          <div class="searchrow"><input class="field" id="botProfilePlayer" placeholder="Wpisz gracza" list="suggest-botProfilePlayer"><button class="btn primary" id="botProfileSearch">Pobierz profil</button></div>
+          <div class="result" id="botProfileResult"></div>
+        </div>
         <div class="cols">
           <div class="panel">
             <div class="panel-title"><h2>Fortece</h2><button class="btn primary" id="botFortressLoad">Pobierz fortece</button></div>
@@ -204,10 +209,39 @@ $("botScanStart").onclick=async()=>{
 };
 $("server").addEventListener("change",()=>{if(!$("view-map").classList.contains("active"))return;refreshBotScanStatus();});
 
+
+$("botProfileSearch").dataset.label=$("botProfileSearch").textContent;
+$("botProfileSearch").onclick=async()=>{
+  const name=$("botProfilePlayer").value.trim(),btn=$("botProfileSearch"),out=$("botProfileResult");
+  if(!name)return;
+  const label=btn.dataset.label;btn.disabled=true;btn.textContent="Pobieranie…";
+  out.innerHTML='<div class="notice">Pobieranie profilu, rankingu i statystyk gracza…</div>';
+  try{
+    const profileResponse=await api("/api/game/player/"+encodeURIComponent(name)+"?server="+server());
+    const profile=profileResponse.data||{};
+    const playerId=Number(profile.player_id||profile.id||profile.playerId||0);
+    if(!playerId){
+      out.innerHTML='<h3>'+esc(profile.player_name||profile.playerName||name)+'</h3>'+objectTable(profile)+'<div class="notice warn">API nie zwróciło identyfikatora gracza, więc nie można pobrać rankingu i statystyk.</div>';
+      return;
+    }
+    const [ranking,stats]=await Promise.allSettled([
+      api("/api/bot/player-ranking/"+playerId+"?server="+server()),
+      api("/api/bot/player-statistics/"+playerId+"?server="+server())
+    ]);
+    const title=profile.player_name||profile.playerName||profile.name||name;
+    const view=(label,result)=>result.status==="fulfilled"?'<div class="panel-title"><h3>'+label+'</h3></div>'+objectTable(result.value.data??result.value):'<div class="notice warn">'+label+': '+esc(result.reason?.message||"Błąd pobierania")+'</div>';
+    out.innerHTML='<h3>'+esc(title)+'</h3><div class="panel-title"><h3>Profil</h3></div>'+objectTable(profile)+view("Ranking",ranking)+view("Statystyki",stats);
+  }catch(err){out.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
+  finally{btn.disabled=false;btn.textContent=label}
+};
+$("botProfilePlayer").addEventListener("keydown",e=>{if(e.key==="Enter")$("botProfileSearch").click()});
+attachSuggestions("botProfilePlayer","players");
+
 </script>
 <datalist id="suggest-playerName"></datalist>
 <datalist id="suggest-allianceName"></datalist>
 <datalist id="suggest-botTargetName"></datalist>
+<datalist id="suggest-botProfilePlayer"></datalist>
 <datalist id="suggest-botFortressPlayer"></datalist>
 <datalist id="suggest-botStormOccupier"></datalist>
 </body></html>
