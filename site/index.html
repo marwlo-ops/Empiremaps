@@ -61,7 +61,7 @@
       <section class="view" id="view-alliance"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Sojusze</h1><p>Wyszukaj sojusz i sprawdź dostępne informacje.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="allianceName" placeholder="Nazwa sojuszu" list="suggest-allianceName"><button class="btn primary" id="allianceSearch">Szukaj sojuszu</button></div><div class="result" id="allianceResult"></div></div></section>
       <section class="view" id="view-fortress"><div class="welcome"><div><div class="eyebrow">HISTORIA DZIAŁAŃ</div><h1>Historia fortec</h1><p>Lista zarejestrowanych ataków gracza na fortece.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="fortressName" placeholder="Nazwa gracza"><button class="btn primary" id="fortressSearch">Pobierz historię</button></div><div class="result" id="fortressResult"></div></div></section>
       <section class="view" id="view-server"><div class="welcome"><div><div class="eyebrow">ANALITYKA ŚWIATA</div><h1>Statystyki serwera</h1><p>Globalne statystyki wybranego świata gry.</p></div></div><div class="panel"><div class="panel-title"><h2>Podsumowanie świata</h2><button class="btn primary" id="serverSearch">Odśwież dane</button></div><div class="result" id="serverResult"></div></div></section>
-      <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Przenoszenie funkcji mapy i wyszukiwania celów do interfejsu WWW.</p></div></div>
+      <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Wyszukiwanie celów, analiza obiektów i podgląd ruchów serwera.</p></div></div>
         <div class="panel" style="margin-bottom:16px">
           <div class="panel-title"><h2>Indeks graczy i sojuszy</h2><div class="searchrow"><button class="btn" id="botScanRefresh">Sprawdź stan</button><button class="btn primary" id="botScanStart">Uruchom skan serwera</button></div></div>
           <div class="result" id="botScanStatus"><div class="notice">Indeks nazw jest pobierany z wybranego serwera. Możesz uruchomić skan ręcznie.</div></div>
@@ -124,7 +124,7 @@
           <div class="searchrow"><input class="field" id="botCastleId" type="number" min="1" placeholder="ID zamku"><input class="field" id="botKingdomId" type="number" min="0" placeholder="ID królestwa (0 jeśli nieznane)"><button class="btn primary" id="botCastleAnalysis">Analizuj zamek</button></div>
           <div class="result" id="botCastleResult"></div>
         </div>
-        <div class="notice warn" style="margin-top:16px">To pierwsza część przeniesienia logiki bota do WWW. Radar ruchów na żywo, skanowanie cykliczne, powiadomienia i pełny kreator filtrów celów wymagają kolejnych etapów integracji.</div></section>
+        <div class="notice warn" style="margin-top:16px">Status: radar pobiera dane z API po ręcznym odświeżeniu. Automatyczne monitorowanie w tle i powiadomienia nie są jeszcze aktywne.</div></section>
       <section class="view" id="view-events"><div class="welcome"><div><div class="eyebrow">KALENDARZ</div><h1>Wydarzenia</h1><p>Terminy wydarzeń pobierane z Community Hub.</p></div><button class="btn primary" id="calendarRefresh">Odśwież kalendarz</button></div>
         <div class="searchrow" style="margin-bottom:16px"><button class="btn primary" data-calendar-view="main">Pełny kalendarz</button><button class="btn" data-calendar-view="future">Najbliższe 7 dni</button><button class="btn" data-calendar-view="alliance">Wydarzenia sojusznicze</button></div>
         <div class="panel"><div class="panel-title"><h2 id="calendarTitle">Pełny kalendarz</h2><span class="sub" id="calendarUpdated">Oczekiwanie na dane…</span></div><div class="result" id="calendarResult"><div class="notice">Wczytywanie kalendarza…</div></div></div>
@@ -206,7 +206,10 @@ async function refreshBotScanStatus(schedule=true){
     const scan=data.scan||{};
     const box=$("botScanStatus");
     if(scan.running){
-      box.innerHTML='<div class="notice">Skanowanie '+esc(data.server)+' trwa. Po zakończeniu dostępne będą podpowiedzi graczy i sojuszy.</div>';
+      const done=Number(scan.pages_completed||0),total=Number(scan.total_pages||0),players=Number(scan.players_found||0);
+      const progress=total>0?Math.min(100,Math.round(done/total*100)):0;
+      const meter=total>0?('<div style="height:8px;background:#0d151e;border-radius:8px;overflow:hidden;margin:12px 0 6px"><div style="height:100%;width:'+progress+'%;background:linear-gradient(90deg,var(--gold),var(--gold2));transition:width .3s"></div></div><small>'+done+' / '+total+' stron • '+progress+'%</small>'):'Pobieranie pierwszej strony…';
+      box.innerHTML='<div class="notice">Skanowanie <b>'+esc(data.server)+'</b> trwa.<br>Odczytano graczy: <b>'+players.toLocaleString("pl-PL")+'</b><br>'+meter+'</div>';
     }else if(scan.error){
       box.innerHTML='<div class="notice warn">Skan zakończył się błędem: '+esc(scan.error)+'</div>';
     }else if(data.cached){
