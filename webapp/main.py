@@ -503,6 +503,7 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
             "alliance": str(alliance).strip() or "Bez sojuszu",
             "player_id": row.get("player_id") or row.get("id"),
             "peace_disabled_at": end.isoformat(),
+            "updated_at": row.get("updated_at"),
             "might": row.get("might_current"),
         })
     if alliance.strip():
