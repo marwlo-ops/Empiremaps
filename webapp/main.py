@@ -29,8 +29,7 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_ar
 if DATABASE_URL.startswith("sqlite"):
     # SQLite has no schemas. Translate the logical PostgreSQL schema for ALL
     # connections, including request sessions, not only during create_all().
-    engine = engine.execution_options(schema_translate_map={"empiremaps": None})
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 if not DATABASE_URL.startswith("sqlite"):
     with engine.begin() as connection:
@@ -41,7 +40,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "web_users"
-    __table_args__ = {"schema": "empiremaps"}
+    __table_args__ = {"schema": None} if DATABASE_URL.startswith("sqlite") else {"schema": "empiremaps"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
