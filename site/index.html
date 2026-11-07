@@ -26,6 +26,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
       <button data-view="server"><span class="sym">▦</span>Statystyki serwera</button>
       <button data-view="map"><span class="sym">◈</span>Mapa i radar</button>
       <button data-view="movement-review"><span class="sym">⇄</span>Przegląd ruchów</button>
+      <button data-view="alerts"><span class="sym">🔔</span>Powiadomienia</button>
       <button data-view="ptaki"><span class="sym">🐦</span>Ptaki</button>
       <button data-view="mapa"><span class="sym">🗺</span>Mapa sojuszy</button>
       <button data-view="events"><span class="sym">◷</span>Wydarzenia</button>
@@ -118,7 +119,8 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
           <div class="result" id="botCastleResult"></div>
         </div>
         <div class="notice warn" style="margin-top:16px">Status: radar pobiera dane z API po ręcznym odświeżeniu. Automatyczne monitorowanie w tle i powiadomienia nie są jeszcze aktywne.</div></section>
-      <section class="view" id="view-movement-review">
+      <section class="view" id="view-alerts"><div class="welcome"><div><div class="eyebrow">ALERTY • FORTECE I WYSPY</div><h1>Powiadomienia</h1><p>Obserwuj wybrane obiekty. Alert przyjdzie około minuty przed ponowną dostępnością.</p></div></div><div class="panel"><div class="searchrow"><button class="btn primary" id="pushEnable">Włącz powiadomienia na tym telefonie</button><button class="btn secondary" id="pushTest">Wyślij powiadomienie testowe</button></div><div class="notice" id="pushStatus">Włącz powiadomienia i zezwól przeglądarce na ich wysyłanie.</div><div class="panel-title" style="margin-top:18px"><h2>Obserwowane obiekty</h2><button class="btn secondary" id="pushRefresh">Odśwież</button></div><div id="pushWatchList" class="bird-list"></div></div></section>
+<section class="view" id="view-movement-review">
         <div class="welcome"><div><div class="eyebrow">TAKTYKA • RUCHY WOJSK</div><h1>Przegląd ruchów</h1><p>Ataki i wsparcia graczy z RB, MD oraz Pijaków Albionu.</p></div></div>
         <div class="panel">
           <div class="searchrow">
@@ -250,9 +252,28 @@ function renderBotPayload(payload){
   }
   return (meta.length?objectTable(Object.fromEntries(meta)):"")+notice("rekordów")+tableFromArray(rows);
 }
+
+function decorateWatchButtons(result,payload){
+  if(!payload||typeof payload!=="object")return;
+  const kind=Array.isArray(payload.dungeons)?"fortress":Array.isArray(payload.isles)?"island":null;
+  const rows=kind?payload[kind==="fortress"?"dungeons":"isles"]:[];
+  const cards=result.querySelectorAll(kind==="island"?".isle-card":".radar-card");
+  if(!kind)return;
+  rows.forEach((x,index)=>{
+    const card=cards[index];if(!card||card.querySelector(".watch-target"))return;
+    const btn=document.createElement("button");btn.type="button";btn.className="btn secondary watch-target";btn.style.cssText="margin-top:12px;width:100%";
+    const coords=(x.position_x??"?")+":"+(x.position_y??"?");
+    const kingdom=kind==="fortress"?({1:"Piaski",2:"Lodowa Kraina",3:"Szczyty Ognia"}[x.kid]||"Forteca"):"Wyspy sztormowe";
+    btn.dataset.watchKind=kind;btn.dataset.watchKey=kind==="fortress"?("f:"+x.kid+":"+x.position_x+":"+x.position_y):("i:"+x.isle_id+":"+x.position_x+":"+x.position_y);
+    btn.dataset.watchLabel=kingdom+" "+coords;btn.dataset.watchX=x.position_x??"";btn.dataset.watchY=x.position_y??"";btn.dataset.watchKingdom=kingdom;
+    if(kind==="island")btn.dataset.watchIsle=x.isle_id??"";
+    btn.textContent=kind==="fortress"?"Obserwuj fortecę":"Obserwuj wyspę";card.appendChild(btn);
+  });
+}
+
 async function runBotSearch(btn,result,url){
   btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z API GGE Tracker…</div>';
-  try{const response=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="API GGE Tracker: połączenie działa";const value=response.data??response;result.innerHTML=renderBotPayload(value)}
+  try{const response=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="API GGE Tracker: połączenie działa";const value=response.data??response;result.innerHTML=renderBotPayload(value);decorateWatchButtons(result,value)}
   catch(err){$("trackerDot").classList.add("off");$("trackerStatus").textContent="API GGE Tracker: błąd zapytania";result.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
   finally{btn.disabled=false;btn.textContent=label}
 }
@@ -501,6 +522,34 @@ $("birdsRefresh").onclick=loadBirds;
 $("birdsSort").addEventListener("change",renderBirds);
 document.querySelector('[data-view="ptaki"]')?.addEventListener("click",()=>{loadBirdAlliances();if(!birdsRows.length)loadBirds()});
 
+
+const pushStorageKey="empiremaps-push-endpoint";let pushEndpoint=localStorage.getItem(pushStorageKey)||"";
+function pushKeyBytes(value){const pad="=".repeat((4-value.length%4)%4);return Uint8Array.from(atob((value+pad).replace(/-/g,"+").replace(/_/g,"/")),c=>c.charCodeAt(0));}
+async function enablePush(){
+ if(!("serviceWorker"in navigator)||!("PushManager"in window)||!("Notification"in window))throw new Error("Ta przeglądarka nie obsługuje powiadomień push.");
+ const cfg=await api("/api/push/config");if(!cfg.enabled||!cfg.public_key)throw new Error("Serwer powiadomień nie jest jeszcze skonfigurowany.");
+ if(await Notification.requestPermission()!=="granted")throw new Error("Nie przyznano zgody na powiadomienia.");
+ const reg=await navigator.serviceWorker.ready;let sub=await reg.pushManager.getSubscription();
+ if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:pushKeyBytes(cfg.public_key)});
+ const saved=await api("/api/push/subscribe",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({subscription:sub.toJSON()})});
+ pushEndpoint=saved.endpoint;localStorage.setItem(pushStorageKey,pushEndpoint);$("pushStatus").textContent="Powiadomienia są włączone na tym urządzeniu.";
+}
+async function refreshPushWatches(){
+ if(!pushEndpoint){$("pushWatchList").innerHTML='<div class="notice">Najpierw włącz powiadomienia na tym telefonie.</div>';return;}
+ try{const data=await api("/api/push/watches?endpoint="+encodeURIComponent(pushEndpoint));const items=data.items||[];
+ $("pushWatchList").innerHTML=items.length?items.map(x=>'<article class="bird-card"><div class="bird-card-head"><b>'+esc(x.label||x.key)+'</b><span>'+esc(x.kind==="fortress"?"Forteca":"Wyspa")+'</span></div><div class="notice">'+esc(x.kingdom||"")+' • '+esc((x.x||"?")+":"+(x.y||"?"))+'</div><button class="btn secondary unwatch-target" data-unwatch-key="'+esc(x.key)+'" style="margin-top:10px">Usuń obserwowanie</button></article>').join(""):'<div class="notice">Nie obserwujesz jeszcze żadnych obiektów.</div>';
+ }catch(e){$("pushWatchList").innerHTML='<div class="notice warn">'+esc(e.message)+'</div>';}
+}
+$("pushEnable").onclick=async()=>{const b=$("pushEnable");b.disabled=true;try{await enablePush();await refreshPushWatches();}catch(e){$("pushStatus").textContent=e.message;}finally{b.disabled=false;}};
+$("pushTest").onclick=async()=>{try{if(!pushEndpoint)await enablePush();await api("/api/push/test",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({endpoint:pushEndpoint})});$("pushStatus").textContent="Test wysłany — sprawdź powiadomienia telefonu.";}catch(e){$("pushStatus").textContent=e.message;}};
+$("pushRefresh").onclick=refreshPushWatches;
+document.addEventListener("click",async event=>{
+ const watch=event.target.closest(".watch-target"),remove=event.target.closest(".unwatch-target");
+ if(watch){try{if(!pushEndpoint)await enablePush();const target={kind:watch.dataset.watchKind,key:watch.dataset.watchKey,label:watch.dataset.watchLabel,x:watch.dataset.watchX,y:watch.dataset.watchY,kingdom:watch.dataset.watchKingdom,isle_id:watch.dataset.watchIsle,server:server()};await api("/api/push/watch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({endpoint:pushEndpoint,target})});watch.textContent="Obserwujesz ✓";watch.disabled=true;}catch(e){alert(e.message);}}
+ if(remove){try{await api("/api/push/watch?endpoint="+encodeURIComponent(pushEndpoint)+"&key="+encodeURIComponent(remove.dataset.unwatchKey),{method:"DELETE"});refreshPushWatches();}catch(e){alert(e.message);}}
+});
+document.querySelector('[data-view="alerts"]')?.addEventListener("click",refreshPushWatches);
+
 let installPromptEvent=null;
 const installButton=$("installApp");
 window.addEventListener("beforeinstallprompt",event=>{event.preventDefault();installPromptEvent=event;installButton.classList.add("primary");installButton.textContent="Zainstaluj";});
@@ -510,7 +559,7 @@ installButton.onclick=async()=>{
   const standalone=window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone;
   alert(standalone?"Empiremaps jest już zainstalowane.":"Aby zainstalować: otwórz menu Chrome ⋮ i wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”. Jeśli tej opcji nie ma, odśwież stronę i spróbuj ponownie.");
 };
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=4",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=5",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
 </script>
 <datalist id="suggest-playerName"></datalist>
 <datalist id="suggest-allianceName"></datalist>
