@@ -248,7 +248,7 @@ async def _scan_server_for_suggestions(server: str):
     """Pobiera indeks nazw graczy/sojuszy z paginowanego API; bez zależności od Discorda."""
     key = server.upper()
     status = BOT_SCAN_STATUS.setdefault(key, {})
-    status.update({"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "error": None})
+    status.update({"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "error": None, "pages_completed": 0, "total_pages": None, "players_found": 0, "alliances_found": 0})
     try:
         # Mirror the proven player-scan query used by the source bot.
         # Tracker returns pagination.total_pages; request the same 100 rows/page.
@@ -293,12 +293,16 @@ async def _scan_server_for_suggestions(server: str):
                     alliance = alliance[1:-1]
                 players[str(name).strip()] = str(alliance).strip()
         add_rows(rows)
+        status.update({"pages_completed": 1, "total_pages": total_pages, "players_found": len(players)})
         for page in range(2, total_pages + 1):
             page_params = dict(scan_params)
             page_params["page"] = page
             payload = await bot_tracker_get("players", key, page_params)
             page_rows, _ = unpack(payload)
             add_rows(page_rows)
+            alliances_progress = {v for v in players.values() if v and v.casefold() != "sans alliance"}
+            status.update({"pages_completed": page, "total_pages": total_pages,
+                           "players_found": len(players), "alliances_found": len(alliances_progress)})
             if page < total_pages:
                 await asyncio.sleep(1.2)
         alliances = sorted({v for v in players.values() if v and v.casefold() != "sans alliance"}, key=str.casefold)
@@ -308,10 +312,12 @@ async def _scan_server_for_suggestions(server: str):
             "player_count": len(players), "page_count": total_pages,
         }
         status.update({"running": False, "finished_at": datetime.now(timezone.utc).isoformat(),
-                       "players": len(players), "alliances": len(alliances), "pages": total_pages, "error": None})
+                       "players": len(players), "alliances": len(alliances), "pages": total_pages,
+                       "pages_completed": total_pages, "total_pages": total_pages,
+                       "players_found": len(players), "alliances_found": len(alliances), "error": None})
     except Exception as exc:
         status.update({"running": False, "finished_at": datetime.now(timezone.utc).isoformat(),
-                       "error": str(exc)[:300]})
+                       "error": str(exc)[:300], "players_found": status.get("players_found", 0)})
     finally:
         BOT_SCAN_TASKS.pop(key, None)
 
