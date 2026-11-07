@@ -15,18 +15,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
 @media(max-width:680px){.topbar{width:100%;min-width:0;gap:7px;padding:0 9px}.topbar>div:first-child{min-width:0;flex:0 1 auto}.crumb{font-size:10px;white-space:nowrap}.top-actions{min-width:0;flex:1;gap:5px;justify-content:flex-end}.server{min-width:0;max-width:112px;padding:8px 5px;font-size:10px}.user-pill{display:none}.top-actions .btn{padding:9px 8px;font-size:10px}.birds-table,.birds-table tbody,.birds-table tr,.birds-table td{display:block;width:100%}.birds-table thead{display:none}.birds-table tr{padding:9px 11px;margin:0 0 9px;border:1px solid var(--line);border-radius:9px;background:#111d28}.birds-table td{display:grid;grid-template-columns:minmax(105px,38%) minmax(0,1fr);gap:9px;padding:7px 0;border-bottom:1px solid #293949;font-size:12px;min-width:0!important}.birds-table td:last-child{border-bottom:0}.birds-table td:before{content:attr(data-label);color:var(--gold);font-size:9px;font-weight:800;letter-spacing:.04em;text-transform:uppercase}.birds-table td small{grid-column:2;line-height:1.5}.panel{padding:16px}.content{overflow:hidden}.isle-card-grid{grid-template-columns:1fr 1fr}.isle-card-grid>div:last-child{grid-column:1/-1}.isle-dates{grid-template-columns:1fr}.isle-dates .isle-next{grid-column:auto}.isle-dates strong{font-size:14px}.isle-next strong{font-size:16px}}@media(max-width:680px){.view#view-map .panel-title{align-items:flex-start;flex-wrap:wrap}.view#view-map .panel-title>.searchrow{width:100%;margin:0}.view#view-map .panel-title>.searchrow .btn{flex:1 1 100%;width:100%}.view#view-map .searchrow{display:grid;grid-template-columns:minmax(0,1fr);gap:9px}.view#view-map .searchrow>.field,.view#view-map .searchrow>.btn{width:100%;min-width:0;max-width:100%}.view#view-map .radar-card,.view#view-map .isle-card{width:100%;max-width:100%;overflow:hidden}.view#view-map .radar-card-grid,.view#view-map .isle-card-grid{grid-template-columns:minmax(0,1fr)}.view#view-map .radar-card-grid>div,.view#view-map .isle-card-grid>div,.view#view-map .isle-dates>div{min-width:0;overflow-wrap:anywhere;word-break:break-word}.view#view-map .radar-card-grid .radar-date strong,.view#view-map .isle-dates strong{white-space:normal;overflow-wrap:anywhere;word-break:break-word}.view#view-map .result{min-width:0;width:100%;overflow:visible}.view#view-map .panel{min-width:0;max-width:100%;overflow:hidden}.view#view-map .notice{overflow-wrap:anywhere;word-break:break-word}}</style>
 </head>
 <body>
-<div id="authScreen" class="auth-screen">
-  <form class="auth-card" id="authForm">
-    <div class="auth-logo"><div class="crest">♜</div><h1>EMPIRE<span>MAPS</span></h1><p>INTERNETOWE CENTRUM DOWODZENIA GGE</p></div>
-    <div class="eyebrow" id="authTitle">DOSTĘP DO PANELU</div>
-    <label for="email">Adres e-mail</label><input class="field" id="email" type="email" autocomplete="email" required placeholder="dowódca@example.com">
-    <label for="password">Hasło (minimum 10 znaków)</label><input class="field" id="password" type="password" autocomplete="current-password" minlength="10" required placeholder="••••••••••">
-    <button class="btn primary" id="authSubmit" type="submit">Zaloguj się</button>
-    <div class="error" id="authError"></div>
-    <div class="auth-toggle"><span id="authSwitchText">Nie masz konta?</span> <button type="button" class="text-btn" id="authSwitch">Utwórz konto</button></div>
-  </form>
-</div>
-<div class="shell hidden" id="appShell">
+<div class="shell" id="appShell">
   <aside class="sidebar" id="sidebar">
     <a class="logo" href="#"><div class="crest">♜</div><div>EMPIRE<span>MAPS</span></div></a>
     <div><div class="side-label">CENTRUM DOWODZENIA</div><nav class="nav" id="nav">
@@ -161,19 +150,16 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
   </main>
 </div>
 <script>
-const $=id=>document.getElementById(id);let registerMode=false,token=localStorage.getItem("empiremaps_token")||"";
+const $=id=>document.getElementById(id);let token="";
 const esc=v=>String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-function setAuthMode(){ $("authTitle").textContent=registerMode?"NOWE KONTO":"DOSTĘP DO PANELU";$("authSubmit").textContent=registerMode?"Utwórz konto":"Zaloguj się";$("authSwitchText").textContent=registerMode?"Masz już konto?":"Nie masz konta?";$("authSwitch").textContent=registerMode?"Zaloguj się":"Utwórz konto";$("password").autocomplete=registerMode?"new-password":"current-password";$("authError").textContent=""}
-$("authSwitch").onclick=()=>{registerMode=!registerMode;setAuthMode()};
-async function api(path,opts={}){const res=await fetch(path,{...opts,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...(opts.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.detail||"Wystąpił błąd połączenia.");return data}
+async function api(path,opts={}){const res=await fetch(path,{...opts,headers:{"Content-Type":"application/json",...(opts.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.detail||"Wystąpił błąd połączenia.");return data}
 const DEFAULT_SERVER="E4K_PL1_BETA";
 function applyDefaultServer(){const el=$("server");if(el)el.value=DEFAULT_SERVER}
 applyDefaultServer();
-function showApp(user){applyDefaultServer();$("authScreen").classList.add("hidden");$("appShell").classList.remove("hidden");$("userEmail").textContent=user.email||"";health()}
+function showApp(){applyDefaultServer();$("authScreen")?.classList.add("hidden");$("appShell").classList.remove("hidden");if($("userEmail"))$("userEmail").textContent="Tryb publiczny";health()}
 async function health(){try{await api("/api/health");$("apiDot").classList.remove("off");$("apiStatus").textContent="Backend działa";}catch{$("apiDot").classList.add("off");$("apiStatus").textContent="Brak połączenia z backendem";}}
-$("authForm").onsubmit=async e=>{e.preventDefault();$("authSubmit").disabled=true;$("authError").textContent="";try{const data=await api(registerMode?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value,password:$("password").value})});token=data.token;localStorage.setItem("empiremaps_token",token);showApp(data.user)}catch(err){$("authError").textContent=err.message}finally{$("authSubmit").disabled=false}};
-$("logout").onclick=()=>{token="";localStorage.removeItem("empiremaps_token");$("appShell").classList.add("hidden");$("authScreen").classList.remove("hidden");$("password").value=""};
-async function boot(){if(!token)return;try{const user=await api("/api/auth/me");showApp(user)}catch{token="";localStorage.removeItem("empiremaps_token")}}boot();
+if($("logout"))$("logout").remove();
+showApp();
 const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar",ptaki:"Ptaki",mapa:"Mapa sojuszy",events:"Wydarzenia"};
 function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus();if(view==="events")loadCalendar("main")}
 $("nav").onclick=e=>{const b=e.target.closest("button[data-view]");if(b)go(b.dataset.view)};
