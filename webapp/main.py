@@ -28,12 +28,9 @@ elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
-if DATABASE_URL.startswith("sqlite"):
-    # SQLite has no schemas. Translate the logical PostgreSQL schema for ALL
-    # connections, including request sessions, not only during create_all().
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-
-# A single session factory is required for both SQLite and PostgreSQL.
+# SQLite has no schemas; PostgreSQL uses an isolated Empiremaps schema.
+# All ORM models below select schema=None for SQLite and schema="empiremaps"
+# for PostgreSQL, so the same session factory works with either backend.
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 if not DATABASE_URL.startswith("sqlite"):
