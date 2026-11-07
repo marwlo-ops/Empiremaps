@@ -6,7 +6,7 @@ import hashlib
 import base64
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -515,7 +515,7 @@ def _parse_calendar_html(html_text: str):
     now = datetime.now(timezone.utc)
     found, seen = [], set()
     current_key = None
-    date_pattern = re.compile(r"(\\d{2}[/.-]\\d{2})[/.-]?\\s*(?:-|à|to|au|–|—)\\s*(\\d{2}[/.-]\\d{2})", re.I)
+    date_pattern = re.compile(r"(\d{2}[/.-]\d{2})[/.-]?\s*(?:-|à|to|au|–|—)\s*(\d{2}[/.-]\d{2})", re.I)
     for part in parser.parts:
         lower = part.casefold()
         matched = next((key for key in CALENDAR_EVENTS if key in lower), None)
@@ -530,7 +530,7 @@ def _parse_calendar_html(html_text: str):
                 meta = CALENDAR_EVENTS[current_key]
                 start_dt = datetime.strptime(f"{start_s}/{now.year} {meta['start']}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
                 end_dt = datetime.strptime(f"{end_s}/{now.year} {meta['end']}", "%d/%m/%Y %H:%M").replace(tzinfo=timezone.utc)
-                if start_dt < now - __import__("datetime").timedelta(days=180):
+                if start_dt < now - timedelta(days=180):
                     start_dt = start_dt.replace(year=start_dt.year + 1)
                     end_dt = end_dt.replace(year=end_dt.year + 1)
                 if end_dt < start_dt:
@@ -592,7 +592,7 @@ async def bot_calendar(view: str = "main", refresh: bool = False, user: User = D
         end_dt = datetime.fromisoformat(event["end"])
         if end_dt < now:
             continue
-        if view == "future" and not (start_dt > now and start_dt - now <= __import__("datetime").timedelta(days=7)):
+        if view == "future" and not (start_dt > now and start_dt - now <= timedelta(days=7)):
             continue
         if view == "alliance" and event["key"] not in CALENDAR_ALLIANCE_KEYS:
             continue
@@ -605,8 +605,8 @@ async def bot_calendar(view: str = "main", refresh: bool = False, user: User = D
 @app.get("/api/features")
 def features(user: User = Depends(current_user)):
     return {
-        "available": ["player_profile","alliance_profile","server_statistics","fortress_history"],
-        "in_development": ["live_map","target_radar","fortress_scanner","storm_islands","event_calendar","rankings","web_notifications"],
+        "available": ["player_profile","alliance_profile","server_statistics","fortress_history","event_calendar"],
+        "in_development": ["live_map","target_radar","fortress_scanner","storm_islands","rankings","web_notifications"],
         "note": "Funkcje zewnętrzne wymagają dostępności GGE Tracker i prawidłowego serwera."
     }
 
