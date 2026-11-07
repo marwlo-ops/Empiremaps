@@ -1,0 +1,27 @@
+databases:
+  - name: empiremaps-db
+    plan: free
+    region: frankfurt
+    databaseName: empiremaps
+    user: empiremaps
+
+services:
+  - type: web
+    name: empiremaps-web
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: pip install -r webapp/requirements.txt
+    startCommand: uvicorn webapp.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: empiremaps-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: GGETRACKER_API_KEY
+        sync: false
