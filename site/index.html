@@ -57,8 +57,8 @@
           <button data-go="server">▦ <b>Statystyki serwera</b><small>Globalne dane świata</small></button>
         </div></div><div class="panel"><div class="panel-title"><h2>Status połączenia</h2></div><div class="status"><span class="dot" id="trackerDot"></span><span id="trackerStatus">API gry: oczekiwanie na pierwsze zapytanie</span></div><p class="sub" style="margin-top:18px">Dane gry pobierane są z GGE Tracker. Ich dostępność zależy od zewnętrznego API i limitów zapytań.</p><div class="notice warn">Moduły radarów, automatycznego skanowania i mapy na żywo są jeszcze przenoszone z wersji Discord do aplikacji WWW.</div></div></div>
       </section>
-      <section class="view" id="view-player"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Wyszukiwarka graczy</h1><p>Wyszukaj profil gracza w wybranym świecie.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="playerName" placeholder="Nazwa gracza"><button class="btn primary" id="playerSearch">Szukaj gracza</button></div><div class="result" id="playerResult"></div></div></section>
-      <section class="view" id="view-alliance"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Sojusze</h1><p>Wyszukaj sojusz i sprawdź dostępne informacje.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="allianceName" placeholder="Nazwa sojuszu"><button class="btn primary" id="allianceSearch">Szukaj sojuszu</button></div><div class="result" id="allianceResult"></div></div></section>
+      <section class="view" id="view-player"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Wyszukiwarka graczy</h1><p>Wyszukaj profil gracza w wybranym świecie.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="playerName" placeholder="Nazwa gracza" list="suggest-playerName"><button class="btn primary" id="playerSearch">Szukaj gracza</button></div><div class="result" id="playerResult"></div></div></section>
+      <section class="view" id="view-alliance"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Sojusze</h1><p>Wyszukaj sojusz i sprawdź dostępne informacje.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="allianceName" placeholder="Nazwa sojuszu" list="suggest-allianceName"><button class="btn primary" id="allianceSearch">Szukaj sojuszu</button></div><div class="result" id="allianceResult"></div></div></section>
       <section class="view" id="view-fortress"><div class="welcome"><div><div class="eyebrow">HISTORIA DZIAŁAŃ</div><h1>Historia fortec</h1><p>Lista zarejestrowanych ataków gracza na fortece.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="fortressName" placeholder="Nazwa gracza"><button class="btn primary" id="fortressSearch">Pobierz historię</button></div><div class="result" id="fortressResult"></div></div></section>
       <section class="view" id="view-server"><div class="welcome"><div><div class="eyebrow">ANALITYKA ŚWIATA</div><h1>Statystyki serwera</h1><p>Globalne statystyki wybranego świata gry.</p></div></div><div class="panel"><div class="panel-title"><h2>Podsumowanie świata</h2><button class="btn primary" id="serverSearch">Odśwież dane</button></div><div class="result" id="serverResult"></div></div></section>
       <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Przenoszenie funkcji mapy i wyszukiwania celów do interfejsu WWW.</p></div></div><div class="grid">
@@ -69,18 +69,18 @@
         </div>
         <div class="panel" style="margin-bottom:16px">
           <div class="panel-title"><h2>Wyszukiwanie celów</h2><span class="sub">SILNIK GGE ASSISTANT</span></div>
-          <div class="searchrow"><input class="field" id="botTargetName" placeholder="Nazwa gracza lub zamku"><button class="btn primary" id="botTargetSearch">Szukaj celu</button></div>
+          <div class="searchrow"><input class="field" id="botTargetName" placeholder="Nazwa gracza lub zamku" list="suggest-botTargetName"><button class="btn primary" id="botTargetSearch">Szukaj celu</button></div>
           <div class="result" id="botTargetResult"></div>
         </div>
         <div class="cols">
           <div class="panel">
             <div class="panel-title"><h2>Fortece</h2><button class="btn primary" id="botFortressLoad">Pobierz fortece</button></div>
-            <div class="searchrow"><input class="field" id="botFortressPlayer" placeholder="Filtruj po graczu (opcjonalnie)"><input class="field" id="botFortressKingdom" placeholder="ID królestw (opcjonalnie)"></div>
+            <div class="searchrow"><input class="field" id="botFortressPlayer" placeholder="Filtruj po graczu (opcjonalnie)" list="suggest-botFortressPlayer"><input class="field" id="botFortressKingdom" placeholder="ID królestw (opcjonalnie)"></div>
             <div class="result" id="botFortressResult"></div>
           </div>
           <div class="panel">
             <div class="panel-title"><h2>Wyspy sztormowe</h2><button class="btn primary" id="botStormLoad">Pobierz wyspy</button></div>
-            <div class="searchrow"><input class="field" id="botStormOccupier" placeholder="Filtruj po zajmującym graczu"></div>
+            <div class="searchrow"><input class="field" id="botStormOccupier" placeholder="Filtruj po zajmującym graczu" list="suggest-botStormOccupier"></div>
             <div class="result" id="botStormResult"></div>
           </div>
         </div>
@@ -125,6 +125,30 @@ $("allianceSearch").onclick=()=>{const n=$("allianceName").value.trim();if(n)run
 $("fortressSearch").onclick=()=>{const n=$("fortressName").value.trim();if(n)runSearch($("fortressSearch"),$("fortressResult"),"/api/game/player/"+encodeURIComponent(n)+"/fortress-history?server="+server())};
 $("serverSearch").onclick=()=>runSearch($("serverSearch"),$("serverResult"),"/api/game/server/statistics?server="+server());
 
+
+const suggestionTimers={};
+function attachSuggestions(inputId,kind){
+ const input=$(inputId);if(!input)return;
+ const list=$("suggest-"+inputId);if(!list)return;
+ input.setAttribute("autocomplete","off");
+ input.addEventListener("input",()=>{
+   clearTimeout(suggestionTimers[inputId]);
+   const query=input.value.trim();
+   if(query.length<1){list.innerHTML="";return}
+   suggestionTimers[inputId]=setTimeout(async()=>{
+     try{
+       const params=new URLSearchParams({q:query,kind,server:$("server").value});
+       const result=await api("/api/bot/suggestions?"+params.toString());
+       list.innerHTML=(result.items||[]).map(value=>'<option value="'+esc(value)+'"></option>').join("");
+       if(!result.scan_available)input.title=result.message||"Brak danych skanu dla tego serwera";
+       else input.title="Podpowiedzi z ostatniego skanu serwera";
+     }catch(error){list.innerHTML="";input.title=error.message}
+   },180);
+ });
+}
+["playerName","botTargetName","botFortressPlayer"].forEach(id=>attachSuggestions(id,"players"));
+["allianceName"].forEach(id=>attachSuggestions(id,"alliances"));
+
 async function runBotSearch(btn,result,url){
   btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z silnika GGE Assistant…</div>';
   try{const data=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="Silnik GGE Assistant: połączenie działa";const value=data.data??data;result.innerHTML=objectTable(value)}
@@ -141,4 +165,9 @@ $("botCastleAnalysis").onclick=()=>{const id=$("botCastleId").value.trim();if(!i
 
 ["playerName","allianceName","fortressName"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")$(id.replace("Name", "Search")).click()}));
 </script>
+<datalist id="suggest-playerName"></datalist>
+<datalist id="suggest-allianceName"></datalist>
+<datalist id="suggest-botTargetName"></datalist>
+<datalist id="suggest-botFortressPlayer"></datalist>
+<datalist id="suggest-botStormOccupier"></datalist>
 </body></html>
