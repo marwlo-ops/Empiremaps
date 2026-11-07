@@ -435,23 +435,12 @@ async def bot_dove_alliances(server: str = "E4K_PL1_BETA", user: User = Depends(
         BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
     return {"server": key, "items": [], "count": 0, "ready": False, "message": "Trwa skanowanie sojuszy. Odśwież listę za chwilę."}
 
-@app.get("/api/bot/doves")
-async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, alliance: str = "", player: str = "", user: User = Depends(current_user)):
+async def _load_bot_doves(server: str, page_limit: int, alliance: str, player: str):
     """Aktywne okresy ochrony Dove ze wszystkich sojuszy serwera."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
         raise HTTPException(400, "Nieprawidłowy serwer.")
     page_limit = max(1, min(int(page_limit), 200))
     cache_key = server.upper()
-    cached = BOT_DOVE_CACHE.get(cache_key)
-    if cached and time.time() - cached.get("loaded", 0) < 300:
-        all_items = cached["items"]
-        filtered = [x for x in all_items
-                    if (not alliance.strip() or x["alliance"].casefold() == alliance.strip().casefold())
-                    and (not player.strip() or player.strip().casefold() in x["player"].casefold())]
-        filtered.sort(key=lambda item: item["peace_disabled_at"])
-        return {"server": cache_key, "items": filtered, "count": len(filtered),
-                "alliances": cached["alliances"], "scanned_players": cached["scanned_players"],
-                "cached": True, "generated_at": cached["generated_at"]}
     params = {
         "limit": 100, "page": 1, "banFilter": 0,
         "allianceFilter": -1, "protectionFilter": -1,
@@ -537,6 +526,31 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
             "alliances": all_alliances, "pages_scanned": total_pages,
             "pages_available": total_value or total_pages,
             "scanned_players": len(all_rows), "cached": False, "generated_at": now.isoformat()}
+
+
+
+BOT_DOVE_TASKS: dict[str, asyncio.Task] = {}
+
+@app.get("/api/bot/doves")
+async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, alliance: str = "", player: str = "", user: User = Depends(current_user)):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
+        raise HTTPException(400, "Nieprawidłowy serwer.")
+    key = server.upper()
+    cached = BOT_DOVE_CACHE.get(key)
+    if cached and time.time() - cached.get("loaded", 0) < 300:
+        items = [x for x in cached["items"] if (not alliance.strip() or x["alliance"].casefold() == alliance.strip().casefold()) and (not player.strip() or player.strip().casefold() in x["player"].casefold())]
+        items.sort(key=lambda x: x["peace_disabled_at"])
+        return {"server": key, "items": items, "count": len(items), "alliances": cached["alliances"], "scanned_players": cached["scanned_players"], "cached": True, "ready": True, "generated_at": cached["generated_at"]}
+    task = BOT_DOVE_TASKS.get(key)
+    if task is None or task.done():
+        async def run_scan():
+            try:
+                await _load_bot_doves(key, page_limit, alliance, player)
+            finally:
+                BOT_DOVE_TASKS.pop(key, None)
+        BOT_DOVE_TASKS[key] = asyncio.create_task(run_scan())
+    return {"server": key, "items": [], "count": 0, "ready": False, "running": True, "message": "Skan ochron Dove trwa w tle."}
+
 
 @app.get("/api/bot/fortresses/meta")
 async def bot_fortress_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
