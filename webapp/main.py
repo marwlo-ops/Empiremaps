@@ -6,6 +6,7 @@ import hashlib
 import base64
 import json
 import time
+import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -56,6 +57,14 @@ class BotPlayerIndex(Base):
     server: Mapped[str] = mapped_column(String(40), primary_key=True)
     payload: Mapped[str] = mapped_column(Text)
     loaded_at: Mapped[float] = mapped_column(Float)
+
+class PushSubscription(Base):
+    __tablename__ = "push_subscriptions"
+    __table_args__ = {"schema": None} if DATABASE_URL.startswith("sqlite") else {"schema": "empiremaps"}
+    endpoint: Mapped[str] = mapped_column(Text, primary_key=True)
+    subscription_json: Mapped[str] = mapped_column(Text)
+    targets_json: Mapped[str] = mapped_column(Text, default="[]")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
 Base.metadata.create_all(engine)
 
@@ -1243,6 +1252,190 @@ async def bot_calendar(view: str = "main", refresh: bool = False, user: User = D
     return {"view": view, "events": visible, "total": len(visible),
             "updated_at": datetime.fromtimestamp(CALENDAR_CACHE["at"], timezone.utc).isoformat() if CALENDAR_CACHE["at"] else None,
             "source": CALENDAR_SOURCE_URL, "warning": CALENDAR_CACHE["last_error"]}
+
+
+
+# Web Push: powiadomienia o fortecach i wyspach.
+from pydantic import BaseModel
+
+class PushSubscribeBody(BaseModel):
+    subscription: dict
+class PushWatchBody(BaseModel):
+    endpoint: str
+    target: dict
+class PushTestBody(BaseModel):
+    endpoint: str
+
+def _push_ready():
+    return bool(os.getenv("VAPID_PUBLIC_KEY") and os.getenv("VAPID_PRIVATE_KEY"))
+
+def _push_send(subscription: dict, payload: dict):
+    from pywebpush import webpush
+    private_key = os.getenv("VAPID_PRIVATE_KEY", "").replace("\\n", "\n")
+    return webpush(subscription_info=subscription, data=json.dumps(payload, ensure_ascii=False),
+        vapid_private_key=private_key,
+        vapid_claims={"sub": os.getenv("VAPID_SUBJECT", "mailto:admin@empiremaps.app")}, ttl=180)
+
+@app.get("/api/push/config")
+def push_config():
+    return {"enabled": _push_ready(), "public_key": os.getenv("VAPID_PUBLIC_KEY", "")}
+
+@app.post("/api/push/subscribe")
+def push_subscribe(body: PushSubscribeBody):
+    sub = body.subscription
+    endpoint = str(sub.get("endpoint", ""))
+    if not endpoint.startswith("https://") or not isinstance(sub.get("keys"), dict):
+        raise HTTPException(400, "Nieprawidłowa subskrypcja powiadomień.")
+    with SessionLocal() as db:
+        row = db.get(PushSubscription, endpoint)
+        if row:
+            row.subscription_json = json.dumps(sub)
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            db.add(PushSubscription(endpoint=endpoint, subscription_json=json.dumps(sub), targets_json="[]"))
+        db.commit()
+    return {"ok": True, "endpoint": endpoint, "push_enabled": _push_ready()}
+
+@app.get("/api/push/watches")
+def push_watches(endpoint: str):
+    with SessionLocal() as db:
+        row = db.get(PushSubscription, endpoint)
+        return {"items": json.loads(row.targets_json or "[]") if row else []}
+
+@app.post("/api/push/watch")
+def push_watch(body: PushWatchBody):
+    target = body.target
+    if target.get("kind") not in ("fortress", "island") or not target.get("key"):
+        raise HTTPException(400, "Nieprawidłowy obiekt do obserwowania.")
+    with SessionLocal() as db:
+        row = db.get(PushSubscription, body.endpoint)
+        if not row:
+            raise HTTPException(404, "Najpierw włącz powiadomienia na tym urządzeniu.")
+        items = json.loads(row.targets_json or "[]")
+        target["server"] = str(target.get("server") or "E4K_PL1_BETA").upper()
+        target["added_at"] = datetime.now(timezone.utc).isoformat()
+        target["notified_for"] = None
+        items = [x for x in items if not (x.get("key") == target["key"] and x.get("server") == target["server"])]
+        items.append(target)
+        row.targets_json = json.dumps(items, ensure_ascii=False)
+        row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+    return {"ok": True, "items": items}
+
+@app.delete("/api/push/watch")
+def push_unwatch(endpoint: str, key: str):
+    with SessionLocal() as db:
+        row = db.get(PushSubscription, endpoint)
+        if row:
+            items = json.loads(row.targets_json or "[]")
+            row.targets_json = json.dumps([x for x in items if x.get("key") != key], ensure_ascii=False)
+            row.updated_at = datetime.now(timezone.utc)
+            db.commit()
+    return {"ok": True}
+
+@app.post("/api/push/test")
+def push_test(body: PushTestBody):
+    if not _push_ready():
+        raise HTTPException(503, "Serwer powiadomień nie ma skonfigurowanych kluczy VAPID.")
+    with SessionLocal() as db:
+        row = db.get(PushSubscription, body.endpoint)
+        if not row: raise HTTPException(404, "Brak subskrypcji tego urządzenia.")
+        sub = json.loads(row.subscription_json)
+    try:
+        _push_send(sub, {"title":"Empiremaps — test","body":"Powiadomienia działają na tym urządzeniu.","url":"/","tag":"empiremaps-test"})
+    except Exception as exc:
+        raise HTTPException(502, "Nie udało się wysłać testowego powiadomienia: " + str(exc)[:160])
+    return {"ok": True}
+
+def _push_rows(payload, keys):
+    if isinstance(payload, list): return payload
+    if isinstance(payload, dict):
+        for key in keys:
+            value = payload.get(key)
+            if isinstance(value, list): return value
+            if isinstance(value, dict):
+                for nested in keys:
+                    if isinstance(value.get(nested), list): return value[nested]
+    return []
+
+def _push_identity(kind, item):
+    x, y = item.get("position_x"), item.get("position_y")
+    return f"f:{item.get('kid')}:{x}:{y}" if kind == "fortress" else f"i:{item.get('isle_id')}:{x}:{y}"
+
+def _push_unlock(kind, item):
+    raw = item.get("effective_cooldown_until") or item.get("cooldown_until") or item.get("available_at")
+    if kind == "island" and not raw:
+        captured = item.get("captured_at") or item.get("occupied_at") or item.get("occupation_started_at") or item.get("capturedAt") or item.get("occupiedAt")
+        if captured:
+            try:
+                start = datetime.fromisoformat(str(captured).replace("Z", "+00:00"))
+                if start.tzinfo is None: start = start.replace(tzinfo=timezone.utc)
+                raw = (start + timedelta(hours=42 if int(item.get("isle_id") or 0) in (1,2,6) else 90)).isoformat()
+            except Exception: pass
+    if not raw: return None
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception: return None
+
+async def _push_monitor_loop():
+    while True:
+        try:
+            with SessionLocal() as db:
+                records = db.scalars(select(PushSubscription)).all()
+                snapshots = [(r.endpoint, json.loads(r.subscription_json), json.loads(r.targets_json or "[]")) for r in records]
+            groups = {}
+            for endpoint, sub, targets in snapshots:
+                for target in targets:
+                    groups.setdefault((target.get("server","E4K_PL1_BETA"),target.get("kind")), []).append((endpoint,sub,target))
+            current = {}
+            for (server,kind) in groups:
+                try:
+                    if kind == "fortress":
+                        payload = await bot_tracker_get("dungeons",server,{"page":1,"size":500})
+                        rows = _push_rows(payload,("dungeons","items","data","results"))
+                    else:
+                        payload = await bot_tracker_get("storms/isles",server,{"page":1,"size":500,"state":0,"resource":0})
+                        rows = _push_rows(payload,("isles","items","data","results"))
+                    current[(server,kind)] = {_push_identity(kind,x):x for x in rows if isinstance(x,dict)}
+                except Exception as exc:
+                    logging.warning("Push monitor refresh %s/%s: %s",server,kind,exc)
+            for endpoint,sub,target in [entry for values in groups.values() for entry in values]:
+                kind,server,key = target.get("kind"),target.get("server","E4K_PL1_BETA"),target.get("key")
+                item = current.get((server,kind),{}).get(key)
+                if not item: continue
+                unlock = _push_unlock(kind,item)
+                if not unlock: continue
+                now = datetime.now(timezone.utc)
+                seconds = (unlock-now).total_seconds()
+                marker = unlock.isoformat()
+                if -60 <= seconds <= 75 and target.get("notified_for") != marker:
+                    kingdom = {1:"Piaski",2:"Lodowa Kraina",3:"Szczyty Ognia"}.get(item.get("kid"),"Wyspy sztormowe" if kind=="island" else "Fortece")
+                    coords = f"{item.get('position_x','?')}:{item.get('position_y','?')}"
+                    title = "Forteca ponownie dostępna" if kind=="fortress" else "Wyspa ponownie dostępna"
+                    message = f"{kingdom} • {coords} • {unlock.astimezone().strftime('%H:%M:%S')}"
+                    try:
+                        await asyncio.to_thread(_push_send,sub,{"title":title,"body":message,"url":"/","tag":"empiremaps-"+key})
+                        target["notified_for"] = marker
+                        with SessionLocal() as db:
+                            row = db.get(PushSubscription,endpoint)
+                            if row:
+                                saved = json.loads(row.targets_json or "[]")
+                                for entry in saved:
+                                    if entry.get("key")==key and entry.get("server")==server: entry["notified_for"]=marker
+                                row.targets_json = json.dumps(saved,ensure_ascii=False)
+                                db.commit()
+                    except Exception as exc:
+                        logging.warning("Push send failed: %s",str(exc)[:160])
+        except Exception:
+            logging.exception("Push monitor loop error")
+        await asyncio.sleep(60)
+
+@app.on_event("startup")
+async def start_push_monitor():
+    if not getattr(app.state,"push_monitor",None):
+        app.state.push_monitor = asyncio.create_task(_push_monitor_loop())
 
 
 @app.get("/api/features")
