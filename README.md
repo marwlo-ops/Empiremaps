@@ -91,6 +91,8 @@
 │   ├── http_tracing.py
 │   ├── recorders.py
 │   └── runtime.py
+├── site
+│   └── index.html
 ├── Dockerfile
 ├── LICENSE
 ├── README.md
@@ -102,7 +104,7 @@
 ├── ruff.toml
 └── utils.py
 
-11 directories, 46 files
+12 directories, 47 files
 ```
 <!-- TREE-END -->
 *(This section is auto-updated via GitHub Actions)*
