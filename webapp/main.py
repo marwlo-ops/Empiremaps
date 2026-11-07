@@ -654,13 +654,89 @@ async def bot_storm_isles(
         params["filterByState"] = state
     if occupier.strip():
         params["filterByOccupierName"] = occupier.strip()[:80]
-    payload = await bot_tracker_get("storms/isles", server, params)
+
+    # Fetch every available page instead of silently showing only page 1.
+    # Tracker's pagination metadata is preferred; if absent, continue while
+    # full pages arrive. Deduplicate by stable island identity across pages.
+    first_payload = await bot_tracker_get("storms/isles", server, params)
+    def unpack_isles(value):
+        if isinstance(value, list):
+            return value, {}
+        if not isinstance(value, dict):
+            return [], {}
+        rows = value.get("isles", value.get("items", value.get("data", value.get("results", []))))
+        if isinstance(rows, dict):
+            rows = rows.get("isles", rows.get("items", rows.get("data", rows.get("results", []))))
+        meta = value.get("pagination", value)
+        return (rows if isinstance(rows, list) else []), (meta if isinstance(meta, dict) else {})
+
+    first_rows, meta = unpack_isles(first_payload)
+    total_pages_value = meta.get("total_pages", meta.get("totalPages", meta.get("last_page")))
+    if total_pages_value is None:
+        total_count = meta.get("total_items_count", meta.get("total", meta.get("totalItemsCount")))
+        if isinstance(total_count, (int, float)):
+            total_pages_value = max(1, (int(total_count) + size - 1) // size)
+    total_pages = max(1, min(int(total_pages_value or 1), 200))
+    merged = {}
+    def add_isles(rows):
+        added = 0
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            identity = (item.get("isle_id"), item.get("position_x"), item.get("position_y"))
+            if identity not in merged:
+                merged[identity] = item
+                added += 1
+            else:
+                # Keep the freshest copy if an island appears on adjacent pages.
+                merged[identity] = item
+        return added
+
+    add_isles(first_rows)
+    pages_fetched = 1
+    if total_pages_value is not None:
+        for current_page in range(page + 1, total_pages + 1):
+            page_params = dict(params)
+            page_params["page"] = current_page
+            page_payload = await bot_tracker_get("storms/isles", server, page_params)
+            page_rows, _ = unpack_isles(page_payload)
+            add_isles(page_rows)
+            pages_fetched += 1
+            if not page_rows:
+                break
+            if current_page < total_pages:
+                await asyncio.sleep(0.25)
+    else:
+        current_page = page + 1
+        while pages_fetched < 200 and len(first_rows) >= size:
+            page_params = dict(params)
+            page_params["page"] = current_page
+            page_payload = await bot_tracker_get("storms/isles", server, page_params)
+            page_rows, _ = unpack_isles(page_payload)
+            added = add_isles(page_rows)
+            pages_fetched += 1
+            if not page_rows or added == 0 or len(page_rows) < size:
+                break
+            current_page += 1
+            await asyncio.sleep(0.25)
+
+    all_isles = list(merged.values())
     allowed = {1:[3,6], 2:[1,4], 3:[2,5]}.get(resource)
-    if allowed and isinstance(payload, dict) and isinstance(payload.get("isles"), list):
-        payload = dict(payload)
-        payload["isles"] = [item for item in payload["isles"] if isinstance(item, dict) and item.get("isle_id") in allowed]
+    if allowed:
+        all_isles = [item for item in all_isles if item.get("isle_id") in allowed]
+    if isinstance(first_payload, dict):
+        payload = dict(first_payload)
+        payload["isles"] = all_isles
+        payload["pagination"] = dict(meta)
+        payload["pagination"].update({"pages_fetched": pages_fetched, "isles_merged": len(merged)})
+    else:
+        payload = {"isles": all_isles, "pagination": {"pages_fetched": pages_fetched, "isles_merged": len(merged)}}
+    logging.info("Storm isles scan %s: pages=%s total=%s filtered=%s state=%s resource=%s",
+                 server.upper(), pages_fetched, len(merged), len(all_isles), state, resource)
     return {"data": payload, "server": server.upper(),
-            "filters": {"state": state, "resource": resource, "occupier": occupier.strip()}}
+            "filters": {"state": state, "resource": resource, "occupier": occupier.strip()},
+            "coverage": {"pages_fetched": pages_fetched, "isles_before_resource_filter": len(merged),
+                         "isles_returned": len(all_isles), "pagination_reported": total_pages_value is not None}}
 
 
 @app.get("/api/bot/castles/search/{name}")
