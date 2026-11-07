@@ -4,3 +4,5 @@ sqlalchemy>=2.0,<3
 psycopg[binary]>=3.2,<4
 httpx>=0.27,<1
 pydantic[email]>=2.8,<3
+
+pywebpush>=2.0,<3
