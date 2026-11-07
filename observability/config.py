@@ -2,12 +2,9 @@
 ClickHouse settings
 """
 
-import logging
 import os
 import socket
 from dataclasses import dataclass, field
-
-_log = logging.getLogger("GGE_Bot")
 
 
 def _env_str(key: str, default: str = "") -> str:
@@ -16,13 +13,9 @@ def _env_str(key: str, default: str = "") -> str:
 
 
 def _env_int(key: str, default: int) -> int:
-    val_str = _env_str(key, str(default))
     try:
-        return int(val_str)
-    except (TypeError, ValueError) as e:
-        _log.warning(
-            f"⚠️ [Metrics] Valeur invalide pour '{key}' ('{val_str}'). Utilisation de la valeur par défaut : {default}"
-        )
+        return int(_env_str(key, str(default)))
+    except (TypeError, ValueError):
         return default
 
 
@@ -79,8 +72,7 @@ class ClickHouseSettings:
 
         try:
             hostname = socket.gethostname()
-        except Exception as e:
-            _log.error(f"❌ [Metrics] Impossible de récupérer le nom d'hôte local : {e}")
+        except Exception:
             hostname = "unknown"
 
         return cls(
