@@ -812,11 +812,23 @@ async def bot_target_search(
             if (distance_min != -1 and distance < distance_min) or (distance_max != -1 and distance > distance_max):
                 return None
             peace_until = player.get("peace_disabled_at")
+            has_protection = False
+            if peace_until and str(peace_until).lower() != "null":
+                try:
+                    peace_dt = datetime.fromisoformat(str(peace_until).replace("Z", "+00:00"))
+                    if peace_dt.tzinfo is None:
+                        peace_dt = peace_dt.replace(tzinfo=timezone.utc)
+                    has_protection = peace_dt > datetime.now(timezone.utc)
+                except (TypeError, ValueError):
+                    has_protection = False
+            wall_terms = ("repos", "deuil", "hospitalisé", "rest", "hospital", "mourning", "ruhe", "krankenhaus")
+            wall_warning = any(term in alliance.casefold() for term in wall_terms)
             return {
                 "name": name, "alliance": alliance, "level": level, "legendary_level": legendary,
                 "absolute_level": absolute_level, "might": might, "honor": honor, "glory": glory,
                 "loot": loot, "distance": round(distance, 2), "x": coords[0], "y": coords[1],
-                "peace_disabled_at": peace_until, "has_protection": bool(show_doves and peace_until),
+                "peace_disabled_at": peace_until, "has_protection": has_protection,
+                "wall_warning": wall_warning,
             }
 
         valid_count = 0
