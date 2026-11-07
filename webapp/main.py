@@ -862,6 +862,53 @@ async def bot_target_search(
             "truncated": len(scanned_pages) < total_pages,
         }
 
+@app.get("/api/bot/player-history/{player_id}")
+async def bot_player_history(player_id: int, player: str = "", server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if player_id <= 0 or len(player) > 80:
+        raise HTTPException(400, "Nieprawidłowy identyfikator lub nazwa gracza.")
+    async def safe_get(path: str, params: dict | None = None):
+        try:
+            return await bot_tracker_get(path, server, params)
+        except HTTPException as exc:
+            if exc.status_code in (404, 502):
+                return {}
+            raise
+    names, alliances = await asyncio.gather(
+        safe_get(f"updates/players/{player_id}/names"),
+        safe_get(f"updates/players/{player_id}/alliances"),
+    )
+    movements = {}
+    if player.strip():
+        try:
+            url = "https://api-beta.gge-tracker.com/api/v1/server/movements"
+            async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+                response = await client.get(url, headers=bot_headers(server), params={
+                    "page": 1, "castleType": 1, "movementType": 3,
+                    "search": player.strip(), "searchType": "player",
+                })
+            if response.status_code == 200:
+                movements = response.json()
+            elif response.status_code not in (404, 429):
+                raise HTTPException(502, f"GGE Tracker zwrócił błąd {response.status_code} przy historii ruchów.")
+        except HTTPException:
+            raise
+        except Exception:
+            movements = {}
+    def rows(payload, key):
+        if isinstance(payload, list):
+            return payload
+        if isinstance(payload, dict):
+            value = payload.get(key, [])
+            return value if isinstance(value, list) else []
+        return []
+    return {
+        "player_id": player_id, "player": player, "server": server.upper(),
+        "names": rows(names, "updates"),
+        "alliances": rows(alliances, "updates"),
+        "movements": rows(movements, "movements"),
+        "partial": not bool(names) or not bool(alliances),
+    }
+
 @app.get("/api/bot/calendar")
 async def bot_calendar(view: str = "main", refresh: bool = False, user: User = Depends(current_user)):
     if view not in ("main", "future", "alliance"):
