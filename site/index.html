@@ -182,10 +182,24 @@ function attachSuggestions(inputId,kind){
 ["playerName","botTargetName","botProfilePlayer","botFortressPlayer","botStormOccupier","targetOriginPlayer"].forEach(id=>attachSuggestions(id,"players"));
 ["allianceName","targetAllianceFilter"].forEach(id=>attachSuggestions(id,"alliances"));
 
+function renderBotPayload(payload){
+  if(Array.isArray(payload))return tableFromArray(payload);
+  if(!payload||typeof payload!=="object")return objectTable(payload);
+  const collectionKeys=["dungeons","forts","isles","movements","items","data","results"];
+  const key=collectionKeys.find(k=>Array.isArray(payload[k]));
+  if(key){
+    const rows=payload[key];
+    const meta=Object.entries(payload).filter(([k,v])=>k!==key&&(v===null||["string","number","boolean"].includes(typeof v)));
+    return (meta.length?objectTable(Object.fromEntries(meta)):"")+
+      '<div class="notice">Znaleziono rekordów: <b>'+rows.length.toLocaleString("pl-PL")+'</b></div>'+
+      tableFromArray(rows);
+  }
+  return objectTable(payload);
+}
 async function runBotSearch(btn,result,url){
-  btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z silnika GGE Assistant…</div>';
-  try{const data=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="Silnik GGE Assistant: połączenie działa";const value=data.data??data;result.innerHTML=objectTable(value)}
-  catch(err){$("trackerDot").classList.add("off");$("trackerStatus").textContent="Silnik GGE Assistant: błąd zapytania";result.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
+  btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z API GGE Tracker…</div>';
+  try{const response=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="API GGE Tracker: połączenie działa";const value=response.data??response;result.innerHTML=renderBotPayload(value)}
+  catch(err){$("trackerDot").classList.add("off");$("trackerStatus").textContent="API GGE Tracker: błąd zapytania";result.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
   finally{btn.disabled=false;btn.textContent=label}
 }
 ["botTargetSearch","botFortressLoad","botStormLoad","botStormFortsLoad","botCastleAnalysis"].forEach(id=>$(id).dataset.label=$(id).textContent);
