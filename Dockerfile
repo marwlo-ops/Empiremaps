@@ -14,4 +14,5 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY --chown=1001:1001 . .
 USER 1001
 
-CMD ["python3", "discord_bot.py"]
+EXPOSE 8080
+CMD ["python", "-m", "uvicorn", "webapp.main:app", "--host", "0.0.0.0", "--port", "8080"]
