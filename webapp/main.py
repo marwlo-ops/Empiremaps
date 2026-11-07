@@ -352,6 +352,7 @@ async def _scan_server_for_suggestions(server: str):
         alliances = sorted({v for v in players.values() if v and v.casefold() != "sans alliance"}, key=str.casefold)
         BOT_SUGGEST_CACHE[key] = {
             "loaded": time.time(), "players": sorted(players.keys(), key=str.casefold),
+            "player_alliances": players,
             "alliances": alliances, "scan_available": bool(players),
             "player_count": len(players), "page_count": total_pages,
         }
@@ -696,6 +697,113 @@ async def bot_player_statistics(player_id: int, server: str = "E4K_PL1_BETA", us
         raise HTTPException(400, "Nieprawidłowy identyfikator gracza.")
     return {"data": await bot_tracker_get(f"statistics/player/{player_id}", server), "server": server.upper()}
 
+
+
+def _movement_rows(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    for key in ("movements", "items", "data", "results"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return value
+        if isinstance(value, dict):
+            for nested in ("movements", "items", "results"):
+                if isinstance(value.get(nested), list):
+                    return value[nested]
+    return []
+
+def _alliance_matches(label: str, actual: str) -> bool:
+    norm = lambda value: "".join(ch for ch in str(value or "").casefold() if ch.isalnum())
+    a, b = norm(label), norm(actual)
+    aliases = {
+        "rb": ("re-born", "reborn", "rb"),
+        "md": ("md",),
+        "pijakialbionu": ("pijaki albionu", "pijakialbionu"),
+    }
+    candidates = aliases.get(a, (label,))
+    return any(norm(candidate) == b or (len(norm(candidate)) > 3 and norm(candidate) in b) for candidate in candidates)
+
+@app.get("/api/bot/movement-review/players")
+async def bot_movement_review_players(alliance: str, server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    if alliance not in ("RB", "MD", "Pijaki Albionu"):
+        raise HTTPException(400, "Nieprawidłowy sojusz.")
+    key = server.upper()
+    cache = BOT_SUGGEST_CACHE.get(key) or load_persisted_bot_index(key)
+    if cache:
+        BOT_SUGGEST_CACHE[key] = cache
+    mapping = (cache or {}).get("player_alliances") or {}
+    if not mapping:
+        if key not in BOT_SCAN_TASKS:
+            BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
+        return {"server": key, "items": [], "count": 0, "ready": False,
+                "message": "Indeks graczy nie zawiera jeszcze przypisania do sojuszy. Uruchomiono skan serwera."}
+    names = sorted([name for name, guild in mapping.items() if _alliance_matches(alliance, guild)], key=str.casefold)
+    return {"server": key, "alliance": alliance, "items": names, "count": len(names),
+            "ready": True, "cached_at": cache.get("loaded")}
+
+@app.get("/api/bot/movement-review")
+async def bot_movement_review(
+    server: str = "E4K_PL1_BETA", movement_type: int = 3,
+    alliance: str = "", player: str = "", page: int = 1,
+    user: User = Depends(current_user),
+):
+    if movement_type not in (1, 3) or page < 1 or page > 100:
+        raise HTTPException(400, "Wybierz ataki lub wsparcie i poprawną stronę.")
+    if alliance and alliance not in ("RB", "MD", "Pijaki Albionu"):
+        raise HTTPException(400, "Nieprawidłowy sojusz.")
+    if len(player) > 80:
+        raise HTTPException(400, "Nazwa gracza jest zbyt długa.")
+    key = server.upper()
+    cache = BOT_SUGGEST_CACHE.get(key) or load_persisted_bot_index(key)
+    if cache:
+        BOT_SUGGEST_CACHE[key] = cache
+    mapping = (cache or {}).get("player_alliances") or {}
+    if alliance and not mapping:
+        if key not in BOT_SCAN_TASKS:
+            BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
+        raise HTTPException(503, "Indeks graczy i sojuszy jest budowany. Spróbuj ponownie po zakończeniu skanu.")
+    params = {"page": page, "castleType": 1, "movementType": movement_type}
+    payload, source, last_status = None, None, None
+    for base_url in (BOT_API_BASE, "https://api-beta.gge-tracker.com/api/v1"):
+        try:
+            async with httpx.AsyncClient(timeout=18, follow_redirects=True) as client:
+                response = await client.get(base_url + "/server/movements", headers=bot_headers(key), params=params)
+            if response.status_code == 200:
+                payload, source = response.json(), base_url
+                break
+            if response.status_code == 429:
+                raise HTTPException(429, "API radaru ograniczyło liczbę zapytań. Spróbuj później.")
+            last_status = response.status_code
+        except HTTPException:
+            raise
+        except Exception:
+            last_status = "connection_error"
+    if payload is None:
+        raise HTTPException(502, f"API radaru nie udostępniło danych (ostatni kod: {last_status}).")
+    rows = _movement_rows(payload)
+    def first_value(row, keys):
+        for field in keys:
+            value = row.get(field)
+            if value not in (None, ""):
+                return str(value)
+        return ""
+    sender_keys = ("attacker_name", "sender_name", "player_name", "owner_name", "source_player_name", "from_player_name", "origin_name")
+    filtered = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        sender = first_value(row, sender_keys)
+        if alliance and not _alliance_matches(alliance, mapping.get(sender, "")):
+            continue
+        if player and sender.casefold() != player.casefold():
+            continue
+        filtered.append(row)
+    return {"server": key, "movement_type": movement_type, "alliance": alliance or "all",
+            "player": player or "all", "count": len(filtered), "items": filtered,
+            "source": source, "page": page,
+            "note": "Dane czasu i liczebności zależą od pól faktycznie zwracanych przez API."}
 
 @app.get("/api/bot/radar/movements")
 async def bot_radar_movements(
