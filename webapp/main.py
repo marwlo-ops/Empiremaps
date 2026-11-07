@@ -421,6 +421,82 @@ async def bot_suggestions(
             "scan_available": True, "scan_running": False, "message": None,
             "cached_at": cache["loaded"]}
 
+@app.get("/api/bot/doves")
+async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, user: User = Depends(current_user)):
+    """Aktywne okresy ochrony Dove ze wszystkich sojuszy serwera."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
+        raise HTTPException(400, "Nieprawidłowy serwer.")
+    page_limit = max(1, min(int(page_limit), 200))
+    params = {
+        "limit": 100, "page": 1, "banFilter": 0,
+        "allianceFilter": -1, "protectionFilter": -1,
+        "inactiveFilter": -1, "kingdomFilter": 999,
+        "orderBy": "might_current", "orderType": "DESC",
+    }
+    def unpack(payload):
+        if isinstance(payload, list):
+            return payload, {}
+        if not isinstance(payload, dict):
+            return [], {}
+        rows = payload.get("players", payload.get("items", payload.get("data", [])))
+        if isinstance(rows, dict):
+            rows = rows.get("players", rows.get("items", rows.get("data", [])))
+        meta = payload.get("pagination", payload)
+        return (rows if isinstance(rows, list) else []), (meta if isinstance(meta, dict) else {})
+    try:
+        first = await bot_tracker_get("players", server, params)
+        rows, meta = unpack(first)
+        total_value = meta.get("total_pages", meta.get("totalPages", meta.get("last_page")))
+        if total_value is None:
+            total_count = meta.get("total_items_count", meta.get("total", meta.get("totalItemsCount")))
+            if total_count is not None:
+                total_value = max(1, (int(total_count) + 99) // 100)
+        total_pages = max(1, min(int(total_value or 1), page_limit))
+        all_rows = list(rows)
+        for page in range(2, total_pages + 1):
+            next_params = dict(params)
+            next_params["page"] = page
+            payload = await bot_tracker_get("players", server, next_params)
+            page_rows, _ = unpack(payload)
+            all_rows.extend(page_rows)
+            if page < total_pages:
+                await asyncio.sleep(0.25)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(502, f"Nie udało się pobrać listy ochron Dove: {exc}")
+    now = datetime.now(timezone.utc)
+    items = []
+    for row in all_rows:
+        if not isinstance(row, dict):
+            continue
+        until = row.get("peace_disabled_at")
+        if not until or str(until).lower() == "null":
+            continue
+        try:
+            end = datetime.fromisoformat(str(until).replace("Z", "+00:00"))
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            end = end.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            continue
+        if end <= now:
+            continue
+        alliance = row.get("alliance_name") or row.get("alliance") or "Bez sojuszu"
+        if isinstance(alliance, dict):
+            alliance = alliance.get("name") or "Bez sojuszu"
+        items.append({
+            "player": row.get("player_name") or row.get("name") or "—",
+            "alliance": str(alliance).strip() or "Bez sojuszu",
+            "player_id": row.get("player_id") or row.get("id"),
+            "peace_disabled_at": end.isoformat(),
+            "might": row.get("might_current"),
+        })
+    items.sort(key=lambda item: item["peace_disabled_at"])
+    return {"server": server.upper(), "items": items, "count": len(items),
+            "pages_scanned": total_pages, "pages_available": total_value or total_pages,
+            "scanned_players": len(all_rows), "generated_at": now.isoformat()}
+
 @app.get("/api/bot/fortresses/meta")
 async def bot_fortress_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
     return {"data": await bot_tracker_get("dungeons/meta", server), "server": server.upper()}
