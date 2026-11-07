@@ -1,4 +1,4 @@
-const CACHE_NAME = "empiremaps-shell-v2";
+const CACHE_NAME = "empiremaps-shell-v3";
 const SHELL = ["/", "/manifest.webmanifest", "/icons/empiremaps.svg"];
 self.addEventListener("install", event => {
   event.waitUntil(caches.open(CACHE_NAME).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
