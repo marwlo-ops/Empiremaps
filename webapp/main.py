@@ -250,11 +250,15 @@ async def _scan_server_for_suggestions(server: str):
     status = BOT_SCAN_STATUS.setdefault(key, {})
     status.update({"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "error": None})
     try:
-        first = await bot_tracker_get("players", key, {
-            "limit": 100, "page": 1, "banFilter": 0, "allianceFilter": -1,
-            "protectionFilter": -1, "inactiveFilter": 1, "kingdomFilter": 999,
+        # Use the same paging convention as the original bot (/players?page=N).
+        # The API's default page size is 50; an undocumented "limit" parameter
+        # can be ignored and makes page-count calculations unreliable.
+        scan_params = {
+            "page": 1, "banFilter": -1, "allianceFilter": -1,
+            "protectionFilter": -1, "inactiveFilter": -1,
             "orderBy": "might_current", "orderType": "DESC",
-        })
+        }
+        first = await bot_tracker_get("players", key, scan_params)
         def unpack(payload):
             if isinstance(payload, list):
                 return payload, {}
@@ -262,14 +266,16 @@ async def _scan_server_for_suggestions(server: str):
                 return [], {}
             items = payload.get("players", payload.get("items", payload.get("data", [])))
             if isinstance(items, dict):
-                items = items.get("players", items.get("items", []))
+                items = items.get("players", items.get("items", items.get("data", [])))
             meta = payload.get("pagination", payload)
             return (items if isinstance(items, list) else []), (meta if isinstance(meta, dict) else {})
         rows, meta = unpack(first)
         if not rows:
             raise RuntimeError("API nie zwróciło listy graczy.")
-        total_pages = int(meta.get("total_pages", meta.get("totalPages", meta.get("last_page", 1))) or 1)
-        total_pages = max(1, min(total_pages, 200))
+        total_pages_value = meta.get("total_pages", meta.get("totalPages", meta.get("last_page")))
+        if total_pages_value is None and isinstance(meta.get("total"), int):
+            total_pages_value = max(1, (meta["total"] + 49) // 50)
+        total_pages = max(1, min(int(total_pages_value or 1), 200))
         players = {}
         def add_rows(items):
             for item in items:
@@ -286,15 +292,13 @@ async def _scan_server_for_suggestions(server: str):
                 players[str(name).strip()] = str(alliance).strip()
         add_rows(rows)
         for page in range(2, total_pages + 1):
-            payload = await bot_tracker_get("players", key, {
-                "limit": 100, "page": page, "banFilter": 0, "allianceFilter": -1,
-                "protectionFilter": -1, "inactiveFilter": 1, "kingdomFilter": 999,
-                "orderBy": "might_current", "orderType": "DESC",
-            })
+            page_params = dict(scan_params)
+            page_params["page"] = page
+            payload = await bot_tracker_get("players", key, page_params)
             page_rows, _ = unpack(payload)
             add_rows(page_rows)
             if page < total_pages:
-                await asyncio.sleep(1.2)
+                await asyncio.sleep(0.35)
         alliances = sorted({v for v in players.values() if v and v.casefold() != "sans alliance"}, key=str.casefold)
         BOT_SUGGEST_CACHE[key] = {
             "loaded": time.time(), "players": sorted(players.keys(), key=str.casefold),
