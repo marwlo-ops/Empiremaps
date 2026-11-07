@@ -104,7 +104,10 @@
           <div class="result" id="botCastleResult"></div>
         </div>
         <div class="notice warn" style="margin-top:16px">To pierwsza część przeniesienia logiki bota do WWW. Radar ruchów na żywo, skanowanie cykliczne, powiadomienia i pełny kreator filtrów celów wymagają kolejnych etapów integracji.</div></section>
-      <section class="view" id="view-events"><div class="welcome"><div><div class="eyebrow">KALENDARZ</div><h1>Wydarzenia</h1><p>Centrum wydarzeń Goodgame Empire.</p></div></div><div class="notice warn">Kalendarz i automatyczne powiadomienia zostaną podłączone po przeniesieniu parsera wydarzeń do backendu WWW.</div></section>
+      <section class="view" id="view-events"><div class="welcome"><div><div class="eyebrow">KALENDARZ</div><h1>Wydarzenia</h1><p>Terminy wydarzeń pobierane z Community Hub.</p></div><button class="btn primary" id="calendarRefresh">Odśwież kalendarz</button></div>
+        <div class="searchrow" style="margin-bottom:16px"><button class="btn primary" data-calendar-view="main">Pełny kalendarz</button><button class="btn" data-calendar-view="future">Najbliższe 7 dni</button><button class="btn" data-calendar-view="alliance">Wydarzenia sojusznicze</button></div>
+        <div class="panel"><div class="panel-title"><h2 id="calendarTitle">Pełny kalendarz</h2><span class="sub" id="calendarUpdated">Oczekiwanie na dane…</span></div><div class="result" id="calendarResult"><div class="notice">Wczytywanie kalendarza…</div></div></div>
+        </section>
     </div>
   </main>
 </div>
@@ -120,7 +123,7 @@ $("authForm").onsubmit=async e=>{e.preventDefault();$("authSubmit").disabled=tru
 $("logout").onclick=()=>{token="";localStorage.removeItem("empiremaps_token");$("appShell").classList.add("hidden");$("authScreen").classList.remove("hidden");$("password").value=""};
 async function boot(){if(!token)return;try{const user=await api("/api/auth/me");showApp(user)}catch{token="";localStorage.removeItem("empiremaps_token")}}boot();
 const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar",events:"Wydarzenia"};
-function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus()}
+function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus();if(view==="events")loadCalendar("main")}
 $("nav").onclick=e=>{const b=e.target.closest("button[data-view]");if(b)go(b.dataset.view)};
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
 $("mobileMenu").onclick=()=>$("sidebar").classList.toggle("open");
@@ -236,6 +239,42 @@ $("botProfileSearch").onclick=async()=>{
 };
 $("botProfilePlayer").addEventListener("keydown",e=>{if(e.key==="Enter")$("botProfileSearch").click()});
 attachSuggestions("botProfilePlayer","players");
+
+
+let calendarCurrentView="main";
+const calendarTitles={main:"Pełny kalendarz",future:"Najbliższe 7 dni",alliance:"Wydarzenia sojusznicze"};
+async function loadCalendar(view=calendarCurrentView,force=false){
+  calendarCurrentView=view;
+  $("calendarTitle").textContent=calendarTitles[view];
+  document.querySelectorAll("[data-calendar-view]").forEach(b=>b.classList.toggle("primary",b.dataset.calendarView===view));
+  $("calendarResult").innerHTML='<div class="notice">Pobieranie wydarzeń z Community Hub…</div>';
+  try{
+    const data=await api("/api/bot/calendar?view="+encodeURIComponent(view)+(force?"&refresh=true":""));
+    const events=data.events||[];
+    $("calendarUpdated").textContent=data.updated_at?"Aktualizacja: "+new Date(data.updated_at).toLocaleString("pl-PL"):"Źródło nie zwróciło daty aktualizacji";
+    if(data.warning)$("calendarResult").innerHTML='<div class="notice warn">'+esc(data.warning)+'</div>';
+    if(!events.length){
+      $("calendarResult").innerHTML+='<div class="notice">Brak rozpoznanych wydarzeń w tym widoku.</div>';
+      return;
+    }
+    const grouped={};
+    for(const ev of events)(grouped[ev.key]??=[]).push(ev);
+    const groups=Object.entries(grouped).map(([key,list])=>{
+      const e=list[0];
+      const rows=list.map(item=>{
+        const start=new Date(item.start),end=new Date(item.end);
+        return '<div class="searchrow" style="justify-content:space-between"><span>'+start.toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})+'</span><span>→</span><span>'+end.toLocaleDateString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric"})+'</span></div>';
+      }).join("");
+      return '<div class="panel" style="margin-bottom:12px"><div class="panel-title"><h3>'+esc(e.name)+'</h3><span class="sub">'+list.length+' termin(y)</span></div>'+rows+'</div>';
+    }).join("");
+    $("calendarResult").innerHTML=groups;
+  }catch(err){
+    $("calendarUpdated").textContent="Błąd aktualizacji";
+    $("calendarResult").innerHTML='<div class="notice warn">'+esc(err.message)+'</div>';
+  }
+}
+document.querySelectorAll("[data-calendar-view]").forEach(b=>b.onclick=()=>loadCalendar(b.dataset.calendarView));
+$("calendarRefresh").onclick=()=>loadCalendar(calendarCurrentView,true);
 
 </script>
 <datalist id="suggest-playerName"></datalist>
