@@ -33,7 +33,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
     <div class="side-bottom">EMPIREMAPS WEB 0.1<br>Discord nie jest wymagany do logowania ani korzystania z panelu.<br><br>Nieoficjalny projekt społeczności.</div>
   </aside>
   <main class="main">
-    <header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="mobileMenu">☰</button><div class="crumb">EMPIREMAPS　/　<b id="crumb">Przegląd</b></div></div><div class="top-actions"><div class="zoom-control" aria-label="Powiększenie widoku"><button type="button" id="zoomOut" aria-label="Pomniejsz">A−</button><button type="button" id="zoomIn" aria-label="Powiększ">A+</button></div><select class="server" id="server"><option>PL1</option><option>PL2</option><option>INT1</option><option>DE1</option><option>FR1</option><option>E4K_PL1</option><option value="E4K_PL1_BETA" selected>E4K PL1 BETA</option><option>E4K_FR1</option><option>E4K_DE1</option><option>E4K_INT1</option></select><span class="user-pill" id="userEmail"></span><button class="btn secondary" id="installApp" type="button">Zainstaluj aplikację</button><button class="btn secondary" id="logout">Wyloguj</button></div></header>
+    <header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="mobileMenu">☰</button><div class="crumb">EMPIREMAPS　/　<b id="crumb">Przegląd</b></div></div><div class="top-actions"><div class="zoom-control" aria-label="Powiększenie widoku"><button type="button" id="zoomOut" aria-label="Pomniejsz">A−</button><button type="button" id="zoomIn" aria-label="Powiększ">A+</button></div><select class="server" id="server"><option>PL1</option><option>PL2</option><option>INT1</option><option>DE1</option><option>FR1</option><option>E4K_PL1</option><option value="E4K_PL1_BETA" selected>E4K PL1 BETA</option><option>E4K_FR1</option><option>E4K_DE1</option><option>E4K_INT1</option></select><span class="user-pill" id="userEmail"></span><button class="btn secondary" id="installApp" type="button">Zainstaluj aplikację</button></div></header>
     <div class="content">
       <section class="view active" id="view-overview">
         <div class="welcome"><div><div class="eyebrow">WITAJ W SWOIM IMPERIUM</div><h1>Panel dowódcy</h1><p>Najważniejsze narzędzia i dane Twojego serwera w jednym miejscu.</p></div><div class="status"><span class="dot" id="apiDot"></span><span id="apiStatus">Sprawdzanie połączenia…</span></div></div>
@@ -160,7 +160,7 @@ function showApp(){applyDefaultServer();$("authScreen")?.classList.add("hidden")
 async function health(){try{await api("/api/health");$("apiDot").classList.remove("off");$("apiStatus").textContent="Backend działa";}catch{$("apiDot").classList.add("off");$("apiStatus").textContent="Brak połączenia z backendem";}}
 if($("logout"))$("logout").remove();
 showApp();
-const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar",ptaki:"Ptaki",mapa:"Mapa sojuszy",events:"Wydarzenia"};
+const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar","movement-review":"Przegląd ruchów",ptaki:"Ptaki",mapa:"Mapa sojuszy",events:"Wydarzenia"};
 function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus();if(view==="events")loadCalendar("main")}
 $("nav").onclick=e=>{const b=e.target.closest("button[data-view]");if(b)go(b.dataset.view)};
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
@@ -528,7 +528,7 @@ installButton.onclick=async()=>{
   const standalone=window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone;
   alert(standalone?"Empiremaps jest już zainstalowane.":"Aby zainstalować: otwórz menu Chrome ⋮ i wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”. Jeśli tej opcji nie ma, odśwież stronę i spróbuj ponownie.");
 };
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=3",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=4",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
 </script>
 <datalist id="suggest-playerName"></datalist>
 <datalist id="suggest-allianceName"></datalist>
