@@ -61,7 +61,35 @@
       <section class="view" id="view-alliance"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Sojusze</h1><p>Wyszukaj sojusz i sprawdź dostępne informacje.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="allianceName" placeholder="Nazwa sojuszu"><button class="btn primary" id="allianceSearch">Szukaj sojuszu</button></div><div class="result" id="allianceResult"></div></div></section>
       <section class="view" id="view-fortress"><div class="welcome"><div><div class="eyebrow">HISTORIA DZIAŁAŃ</div><h1>Historia fortec</h1><p>Lista zarejestrowanych ataków gracza na fortece.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="fortressName" placeholder="Nazwa gracza"><button class="btn primary" id="fortressSearch">Pobierz historię</button></div><div class="result" id="fortressResult"></div></div></section>
       <section class="view" id="view-server"><div class="welcome"><div><div class="eyebrow">ANALITYKA ŚWIATA</div><h1>Statystyki serwera</h1><p>Globalne statystyki wybranego świata gry.</p></div></div><div class="panel"><div class="panel-title"><h2>Podsumowanie świata</h2><button class="btn primary" id="serverSearch">Odśwież dane</button></div><div class="result" id="serverResult"></div></div></section>
-      <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Przenoszenie funkcji mapy i wyszukiwania celów do interfejsu WWW.</p></div></div><div class="notice warn">Ten moduł wymaga osobnej integracji mapy świata i indeksu współrzędnych. Nie pokazujemy fikcyjnych celów ani danych.</div></section>
+      <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Przenoszenie funkcji mapy i wyszukiwania celów do interfejsu WWW.</p></div></div><div class="grid">
+          <div class="metric"><span class="micon">⌖</span><b>Wyszukiwanie celów</b><span>Wyszukaj zamki i obiekty</span></div>
+          <div class="metric"><span class="micon">♜</span><b>Fortece</b><span>Lista i metadane fortec</span></div>
+          <div class="metric"><span class="micon">🌊</span><b>Wyspy sztormowe</b><span>Forty i zajęte wyspy</span></div>
+          <div class="metric"><span class="micon">♟</span><b>Analiza gracza</b><span>Statystyki i ranking</span></div>
+        </div>
+        <div class="panel" style="margin-bottom:16px">
+          <div class="panel-title"><h2>Wyszukiwanie celów</h2><span class="sub">SILNIK GGE ASSISTANT</span></div>
+          <div class="searchrow"><input class="field" id="botTargetName" placeholder="Nazwa gracza lub zamku"><button class="btn primary" id="botTargetSearch">Szukaj celu</button></div>
+          <div class="result" id="botTargetResult"></div>
+        </div>
+        <div class="cols">
+          <div class="panel">
+            <div class="panel-title"><h2>Fortece</h2><button class="btn primary" id="botFortressLoad">Pobierz fortece</button></div>
+            <div class="searchrow"><input class="field" id="botFortressPlayer" placeholder="Filtruj po graczu (opcjonalnie)"><input class="field" id="botFortressKingdom" placeholder="ID królestw (opcjonalnie)"></div>
+            <div class="result" id="botFortressResult"></div>
+          </div>
+          <div class="panel">
+            <div class="panel-title"><h2>Wyspy sztormowe</h2><button class="btn primary" id="botStormLoad">Pobierz wyspy</button></div>
+            <div class="searchrow"><input class="field" id="botStormOccupier" placeholder="Filtruj po zajmującym graczu"></div>
+            <div class="result" id="botStormResult"></div>
+          </div>
+        </div>
+        <div class="panel" style="margin-top:16px">
+          <div class="panel-title"><h2>Analiza zamku</h2><span class="sub">Dane pobierane bezpośrednio z API gry</span></div>
+          <div class="searchrow"><input class="field" id="botCastleId" type="number" min="1" placeholder="ID zamku"><input class="field" id="botKingdomId" type="number" min="0" placeholder="ID królestwa (0 jeśli nieznane)"><button class="btn primary" id="botCastleAnalysis">Analizuj zamek</button></div>
+          <div class="result" id="botCastleResult"></div>
+        </div>
+        <div class="notice warn" style="margin-top:16px">To pierwsza część przeniesienia logiki bota do WWW. Radar ruchów na żywo, skanowanie cykliczne, powiadomienia i pełny kreator filtrów celów wymagają kolejnych etapów integracji.</div></section>
       <section class="view" id="view-events"><div class="welcome"><div><div class="eyebrow">KALENDARZ</div><h1>Wydarzenia</h1><p>Centrum wydarzeń Goodgame Empire.</p></div></div><div class="notice warn">Kalendarz i automatyczne powiadomienia zostaną podłączone po przeniesieniu parsera wydarzeń do backendu WWW.</div></section>
     </div>
   </main>
@@ -91,6 +119,19 @@ $("playerSearch").onclick=()=>{const n=$("playerName").value.trim();if(n)runSear
 $("allianceSearch").onclick=()=>{const n=$("allianceName").value.trim();if(n)runSearch($("allianceSearch"),$("allianceResult"),"/api/game/alliance/"+encodeURIComponent(n)+"?server="+server())};
 $("fortressSearch").onclick=()=>{const n=$("fortressName").value.trim();if(n)runSearch($("fortressSearch"),$("fortressResult"),"/api/game/player/"+encodeURIComponent(n)+"/fortress-history?server="+server())};
 $("serverSearch").onclick=()=>runSearch($("serverSearch"),$("serverResult"),"/api/game/server/statistics?server="+server());
+
+async function runBotSearch(btn,result,url){
+  btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z silnika GGE Assistant…</div>';
+  try{const data=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="Silnik GGE Assistant: połączenie działa";const value=data.data??data;result.innerHTML=objectTable(value)}
+  catch(err){$("trackerDot").classList.add("off");$("trackerStatus").textContent="Silnik GGE Assistant: błąd zapytania";result.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
+  finally{btn.disabled=false;btn.textContent=label}
+}
+["botTargetSearch","botFortressLoad","botStormLoad","botCastleAnalysis"].forEach(id=>$(id).dataset.label=$(id).textContent);
+$("botTargetSearch").onclick=()=>{const n=$("botTargetName").value.trim();if(n)runBotSearch($("botTargetSearch"),$("botTargetResult"),"/api/bot/castles/search/"+encodeURIComponent(n)+"?server="+server())};
+$("botFortressLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"100",player:$("botFortressPlayer").value.trim(),kingdom_ids:$("botFortressKingdom").value.trim()});runBotSearch($("botFortressLoad"),$("botFortressResult"),"/api/bot/fortresses?"+q.toString())};
+$("botStormLoad").onclick=()=>{const q=new URLSearchParams({server:$("server").value,page:"1",size:"100",occupier:$("botStormOccupier").value.trim()});runBotSearch($("botStormLoad"),$("botStormResult"),"/api/bot/storms/isles?"+q.toString())};
+$("botCastleAnalysis").onclick=()=>{const id=$("botCastleId").value.trim();if(!id)return;const q=new URLSearchParams({server:$("server").value,kingdom_id:$("botKingdomId").value||"0"});runBotSearch($("botCastleAnalysis"),$("botCastleResult"),"/api/bot/castles/"+encodeURIComponent(id)+"/analysis?"+q.toString())};
+
 ["playerName","allianceName","fortressName"].forEach(id=>$(id).addEventListener("keydown",e=>{if(e.key==="Enter")$(id.replace("Name", "Search")).click()}));
 </script>
 </body></html>
