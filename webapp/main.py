@@ -34,7 +34,7 @@ engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_ar
 # for PostgreSQL, so the same session factory works with either backend.
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-if not DATABASE_URL.startswith("sqlite"):
+if engine.dialect.name == "postgresql":
     with engine.begin() as connection:
         connection.execute(text('CREATE SCHEMA IF NOT EXISTS empiremaps'))
 
@@ -43,7 +43,7 @@ class Base(DeclarativeBase):
 
 class User(Base):
     __tablename__ = "web_users"
-    __table_args__ = {"schema": None} if DATABASE_URL.startswith("sqlite") else {"schema": "empiremaps"}
+    __table_args__ = {"schema": None} if engine.dialect.name == "sqlite" else {"schema": "empiremaps"}
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(256))
