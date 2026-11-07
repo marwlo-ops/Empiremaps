@@ -200,73 +200,55 @@ function attachSuggestions(inputId,kind){
 ["allianceName","targetAllianceFilter"].forEach(id=>attachSuggestions(id,"alliances"));
 
 function renderBotPayload(payload){
-  if(Array.isArray(payload))return tableFromArray(payload);
-  if(!payload||typeof payload!=="object")return objectTable(payload);
+  if(Array.isArray(payload)) return tableFromArray(payload);
+  if(!payload || typeof payload!=="object") return objectTable(payload);
   const collectionKeys=["dungeons","forts","isles","movements","items","data","results"];
   const key=collectionKeys.find(k=>Array.isArray(payload[k]));
-  if(key){
-    const rows=payload[key];
-    const meta=Object.entries(payload).filter(([k,v])=>k!==key&&(v===null||["string","number","boolean"].includes(typeof v)));
-    const fmtTime=v=>{if(!v)return "Brak danych";const t=Date.parse(v);if(!Number.isFinite(t))return String(v);return new Date(t).toLocaleString("pl-PL")};
-    const countdown=v=>{const t=Date.parse(v);if(!Number.isFinite(t))return "Brak danych";let sec=Math.max(0,Math.floor((t-Date.now())/1000));if(!sec)return "TERAZ";const d=Math.floor(sec/86400),hh=Math.floor(sec%86400/3600),mm=Math.floor(sec%3600/60);return (d?d+" d ":"")+(hh?hh+" godz. ":"")+(mm?mm+" min":"")};
-    if(key==="isles" || rows.some(x=>x && typeof x==="object" && ("isle_id" in x || "occupier_name" in x || "available_at" in x))){
-      const names={1:"Drewno — mała",2:"Kamień — mała",3:"Akwamaryna — duża",4:"Drewno — duża",5:"Kamień — duża",6:"Akwamaryna — mała"};
-      const stateNames={0:"Wolna",1:"Zajęta",2:"Odnawia się"};
-      const exactTime=v=>{if(!v)return "Brak danych";const t=Date.parse(v);if(!Number.isFinite(t))return String(v);return new Date(t).toLocaleString("pl-PL",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false})};
-      const cards=rows.map(x=>{
-        const captured=x.captured_at||x.occupied_at||x.occupation_started_at||x.capturedAt||x.occupiedAt||null;
-        const ends=x.occupation_ends_at||x.occupied_until||x.occupationEndsAt||x.occupation_end||x.end_at||null;
-        const available=x.available_at||null;
-        const smallIsle=[1,2,6].includes(Number(x.isle_id));
-        const occupationHours=smallIsle?6:18,respawnHours=smallIsle?36:72;
-        const capturedMs=captured?Date.parse(captured):NaN;
-        const calculatedEnd=Number.isFinite(capturedMs)?new Date(capturedMs+occupationHours*3600000).toISOString():null;
-        const calculatedAvailable=Number.isFinite(capturedMs)?new Date(capturedMs+(occupationHours+respawnHours)*3600000).toISOString():null;
-        const effectiveEnd=ends||calculatedEnd,effectiveAvailable=available||calculatedAvailable;
-        const startText=captured?exactTime(captured):"API nie podaje";
-        const endText=effectiveEnd?exactTime(effectiveEnd):"Brak danych";
-        const nextText=effectiveAvailable?countdown(effectiveAvailable):"Brak terminu — brak daty zdobycia";
-        const respawnText=available?"Termin potwierdzony przez API":(calculatedAvailable?(smallIsle?"6 h okupacji + 36 h odnowienia":"18 h okupacji + 72 h odnowienia"):"Nie można obliczyć bez daty zdobycia");
-        return '<article class="isle-card"><div class="isle-card-head"><b>'+esc(names[x.isle_id]||("Wyspa "+(x.isle_id??"?")))+'</b><span>'+esc(stateNames[x.state]||String(x.state??"—"))+'</span></div><div class="isle-card-grid"><div><small>WSPÓŁRZĘDNE</small><strong>'+esc((x.position_x??"?")+":"+(x.position_y??"?"))+'</strong></div><div><small>ZAJMUJĄCY</small><strong>'+esc(x.occupier_name||"—")+'</strong></div><div><small>SOJUSZ</small><strong>'+esc(x.occupier_alliance_name||"—")+'</strong></div></div><div class="isle-dates"><div><small>DATA ZDOBYCIA</small><strong>'+esc(startText)+'</strong></div><div><small>KONIEC OKUPACJI</small><strong>'+esc(endText)+'</strong></div><div class="isle-next"><small>PONOWNA DOSTĘPNOŚĆ</small><strong>'+esc(effectiveAvailable?exactTime(effectiveAvailable):"Brak danych")+'</strong><em>Pozostało: '+esc(nextText)+' · '+esc(respawnText)+'</em></div></div></article>';
-      }).join("");
-      return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono wysp: <b>'+rows.length.toLocaleString("pl-PL")+'</b>. Daty są pokazane w osobnych, czytelnych polach. Mała: 6 h okupacji + 36 h odnowienia = 42 h; duża: 18 h + 72 h = 90 h.</div><div class="isle-list">'+cards+'</div>';
-    }
-    if(key==="dungeons" || rows.some(x=>x && typeof x==="object" && ("kid" in x || "effective_cooldown_until" in x || "cooldown_until" in x) && ("position_x" in x || "position_y" in x))){
-      const now=Date.now();
-      const kingdoms={1:"Piaski",2:"Lodowa Kraina",3:"Szczyty Ognia"};
-      const cards=rows.map(x=>{
-        const until=x.effective_cooldown_until||x.cooldown_until||x.available_at||"";
-        const ts=until?Date.parse(until):0,ready=!ts||!Number.isFinite(ts)||ts<=now;
-        const date=until&&Number.isFinite(ts)?new Date(ts).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}):"—";
-        const coords=(x.position_x??"?")+":"+(x.position_y??"?");
-        return '<article class="radar-card"><div class="radar-card-head"><b>'+esc(kingdoms[x.kid]||("Kraina "+(x.kid??"?")))+'</b><span>'+esc(coords)+'</span></div><div class="radar-card-grid"><div><small>OSTATNI GRACZ</small><strong>'+esc(x.player_name||"—")+'</strong></div><div><small>DYSTANS</small><strong>'+esc(x.distance??"—")+'</strong></div><div class="radar-date"><small>STATUS ATAKU</small><strong style="color:'+(ready?'#70d6a0':'#f2c66d')+'">'+(ready?'Dostępna teraz':'Ponownie za '+countdown(until))+'</strong></div><div class="radar-date"><small>DATA ODBLOKOWANIA</small><strong>'+esc(date)+'</strong></div></div></article>';
-      }).join("");
-      return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono fortec: <b>'+rows.length.toLocaleString("pl-PL")+'</b>. Każda forteca ma osobną kartę, a data odblokowania i status są wyraźnie widoczne.</div><div class="radar-list">'+cards+'</div>';
-    }
-    if(key==="movements"){
-      const labels={movement_id:"ID ruchu",type:"Typ ruchu",movement_type:"Rodzaj",castle_type:"Typ zamku",attacker_name:"Wysyłający",sender_name:"Wysyłający",player_name:"Gracz",owner_name:"Właściciel",target_name:"Cel",target_player_name:"Gracz docelowy",source_name:"Źródło",origin_name:"Punkt startowy",destination_name:"Cel ruchu",from_name:"Z",to_name:"Do",source_x:"X start",source_y:"Y start",target_x:"X celu",target_y:"Y celu",position_x:"X",position_y:"Y",started_at:"Godzina wysłania",start_at:"Godzina wysłania",created_at:"Wykryto",arrival_at:"Przybycie",arrives_at:"Przybycie",end_at:"Koniec",return_at:"Powrót",remaining_time:"Pozostały czas",duration:"Czas ruchu",might_sent:"Moc wysłanych wojsk",army_might:"Moc wysłanych wojsk",troop_power:"Moc wysłanych wojsk",units_power:"Moc wysłanych wojsk",status:"Status"};
-      const dateKeys=new Set(["started_at","start_at","created_at","arrival_at","arrives_at","end_at","return_at","updated_at","detected_at"]);
-      const cards=rows.map(x=>{
-        const entries=Object.entries(x||{}).filter(([k,v])=>v!==null&&v!==""&&typeof v!=="object").slice(0,14);
-        const title=x.attacker_name||x.player_name||x.owner_name||x.target_name||("Ruch "+(x.movement_id??""));
-        const subtitle=x.target_name||x.destination_name||((x.target_x!=null||x.target_y!=null)?(x.target_x??"?")+":"+(x.target_y??"?"):"");
-        const power=Number(x.might_sent??x.army_might??x.troop_power??x.units_power);const troopEstimate=Number.isFinite(power)&&power>0?Math.floor(power/11):null;const cells=entries.filter(([k])=>!["movement_id","attacker_name","sender_name","player_name","owner_name","target_name","destination_name"].includes(k)).map(([k,v])=>{
-          const isDate=dateKeys.has(k)||(/(date|time|_at)$/.test(k)&&typeof v==="string"&&Number.isFinite(Date.parse(v)));
-          const value=isDate&&Number.isFinite(Date.parse(v))?new Date(v).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}):v;
-          return '<div class="'+(isDate?'radar-date':'')+'"><small>'+esc(labels[k]||k.replaceAll("_"," "))+'</small><strong>'+esc(value)+'</strong></div>';
-        }).join("");
-        return '<article class="radar-card"><div class="radar-card-head"><b>'+esc(title)+'</b><span>'+esc(subtitle||"Ruch na serwerze")+'</span></div><div class="radar-card-grid">'+cells+(Number.isFinite(power)&&power>0?'<div><small>MOC WYSŁANYCH WOJSK</small><strong>'+esc(power.toLocaleString("pl-PL"))+'</strong></div><div><small>SZACOWANA LICZBA ŻOŁNIERZY (MOC ÷ 11)</small><strong>'+esc(troopEstimate.toLocaleString("pl-PL"))+'</strong></div>':'<div><small>LICZBA ŻOŁNIERZY</small><strong>API nie udostępnia mocy wysłanych wojsk</strong></div>')+'</div></article>';
-      }).join("");
-      return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono ruchów: <b>'+rows.length.toLocaleString("pl-PL")+'</b>. Szczegóły, kierunek i terminy każdego ruchu są pokazane osobno.</div><div class="radar-list">'+cards+'</div>';
-    }
-      const now=Date.now();
-      const kingdoms={1:"Piaski",2:"Lodowa Kraina",3:"Szczyty Ognia"};
-      const body=rows.map(x=>{const until=x.effective_cooldown_until||"",ts=until?Date.parse(until):0,ready=!ts||!Number.isFinite(ts)||ts<=now;return '<tr><td>'+esc(kingdoms[x.kid]||("Kraina "+(x.kid??"?")) )+'</td><td>'+esc((x.position_x??"?")+":"+ (x.position_y??"?"))+'</td><td>'+esc(x.player_name||"—")+'</td><td>'+esc(x.distance??"—")+'</td><td><b style="color:'+(ready?'#70d6a0':'#f2c66d')+'">'+(ready?'Dostępna teraz':'Ponownie za '+countdown(until))+'</b></td><td>'+esc(until?fmtTime(until):"—")+'</td></tr>'}).join("");
-      return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono fortec: <b>'+rows.length.toLocaleString("pl-PL")+'</b></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Kraina</th><th>Współrzędne</th><th>Ostatni gracz</th><th>Dystans</th><th>Status ataku</th><th>Odblokowanie</th></tr></thead><tbody>'+body+'</tbody></table></div>';
-    }
-    return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono rekordów: <b>'+rows.length.toLocaleString("pl-PL")+'</b></div>'+tableFromArray(rows);
+  if(!key) return objectTable(payload);
+  const rows=payload[key];
+  const meta=Object.entries(payload).filter(([k,v])=>k!==key && (v===null || ["string","number","boolean"].includes(typeof v)));
+  const notice=(label)=>'<div class="notice">Znaleziono '+label+': <b>'+rows.length.toLocaleString("pl-PL")+'</b></div>';
+  const dateText=(v)=>{if(!v)return "Brak danych";const t=Date.parse(v);return Number.isFinite(t)?new Date(t).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false}):String(v)};
+  const countdown=(v)=>{const t=Date.parse(v);if(!Number.isFinite(t))return "Brak danych";let sec=Math.max(0,Math.floor((t-Date.now())/1000));if(!sec)return "TERAZ";const d=Math.floor(sec/86400),h=Math.floor(sec%86400/3600),m=Math.floor(sec%3600/60);return (d?d+" d ":"")+(h?h+" godz. ":"")+(m?m+" min":"")};
+  if(key==="isles" || rows.some(x=>x && typeof x==="object" && ("isle_id" in x || "occupier_name" in x || "available_at" in x))){
+    const names={1:"Drewno — mała",2:"Kamień — mała",3:"Akwamaryna — duża",4:"Drewno — duża",5:"Kamień — duża",6:"Akwamaryna — mała"};
+    const cards=rows.map(x=>{
+      const captured=x.captured_at||x.occupied_at||x.occupation_started_at||x.capturedAt||x.occupiedAt||null;
+      const available=x.available_at||null;
+      const end=x.occupation_ends_at||x.occupied_until||x.occupationEndsAt||x.occupation_end||x.end_at||(captured?new Date(Date.parse(captured)+([1,2,6].includes(Number(x.isle_id))?6:18)*3600000).toISOString():null);
+      const free=available||(captured?new Date(Date.parse(captured)+([1,2,6].includes(Number(x.isle_id))?42:90)*3600000).toISOString():null);
+      return '<article class="isle-card"><div class="isle-card-head"><b>'+esc(names[x.isle_id]||("Wyspa "+(x.isle_id??"?")))+'</b><span>'+esc(x.state??"—")+'</span></div><div class="isle-card-grid"><div><small>WSPÓŁRZĘDNE</small><strong>'+esc((x.position_x??"?")+":"+(x.position_y??"?"))+'</strong></div><div><small>ZAJMUJĄCY</small><strong>'+esc(x.occupier_name||"—")+'</strong></div><div><small>SOJUSZ</small><strong>'+esc(x.occupier_alliance_name||"—")+'</strong></div></div><div class="isle-dates"><div><small>DATA ZDOBYCIA</small><strong>'+esc(captured?dateText(captured):"API nie podaje")+'</strong></div><div><small>KONIEC OKUPACJI</small><strong>'+esc(dateText(end))+'</strong></div><div class="isle-next"><small>PONOWNA DOSTĘPNOŚĆ</small><strong>'+esc(dateText(free))+'</strong><em>Pozostało: '+esc(countdown(free))+'</em></div></div></article>';
+    }).join("");
+    return (meta.length?objectTable(Object.fromEntries(meta)):"")+notice("wysp")+'<div class="isle-list">'+cards+'</div>';
   }
-  return objectTable(payload);
+  if(key==="dungeons" || rows.some(x=>x && typeof x==="object" && ("kid" in x || "effective_cooldown_until" in x || "cooldown_until" in x) && ("position_x" in x || "position_y" in x))){
+    const kingdoms={1:"Piaski",2:"Lodowa Kraina",3:"Szczyty Ognia"};
+    const cards=rows.map(x=>{
+      const until=x.effective_cooldown_until||x.cooldown_until||x.available_at||"";
+      const ts=until?Date.parse(until):0,ready=!ts||!Number.isFinite(ts)||ts<=Date.now();
+      const coords=(x.position_x??"?")+":"+(x.position_y??"?");
+      return '<article class="radar-card"><div class="radar-card-head"><b>'+esc(kingdoms[x.kid]||("Kraina "+(x.kid??"?")))+'</b><span>'+esc(coords)+'</span></div><div class="radar-card-grid"><div><small>OSTATNI GRACZ</small><strong>'+esc(x.player_name||"—")+'</strong></div><div><small>DYSTANS</small><strong>'+esc(x.distance??"—")+'</strong></div><div class="radar-date"><small>STATUS ATAKU</small><strong style="color:'+(ready?'#70d6a0':'#f2c66d')+'">'+(ready?'Dostępna teraz':'Ponownie za '+esc(countdown(until)))+'</strong></div><div class="radar-date"><small>DATA ODBLOKOWANIA</small><strong>'+esc(dateText(until))+'</strong></div></div></article>';
+    }).join("");
+    return (meta.length?objectTable(Object.fromEntries(meta)):"")+notice("fortec")+'<div class="radar-list">'+cards+'</div>';
+  }
+  if(key==="movements"){
+    const labels={movement_id:"ID ruchu",type:"Typ ruchu",movement_type:"Rodzaj",attacker_name:"Wysyłający",sender_name:"Wysyłający",player_name:"Gracz",owner_name:"Właściciel",target_name:"Cel",target_player_name:"Gracz docelowy",source_name:"Źródło",destination_name:"Cel ruchu",started_at:"Godzina wysłania",start_at:"Godzina wysłania",created_at:"Wykryto",arrival_at:"Przybycie",arrives_at:"Przybycie",end_at:"Koniec",return_at:"Powrót",remaining_time:"Pozostały czas",duration:"Czas ruchu",might_sent:"Moc wysłanych wojsk",army_might:"Moc wysłanych wojsk",troop_power:"Moc wysłanych wojsk",units_power:"Moc wysłanych wojsk",status:"Status"};
+    const dateKeys=new Set(["started_at","start_at","created_at","arrival_at","arrives_at","end_at","return_at","updated_at","detected_at"]);
+    const cards=rows.map(x=>{
+      const entries=Object.entries(x||{}).filter(([k,v])=>v!==null&&v!==""&&typeof v!=="object").slice(0,14);
+      const title=x.attacker_name||x.sender_name||x.player_name||x.owner_name||"Ruch";
+      const target=x.target_name||x.target_player_name||x.destination_name||"—";
+      const power=Number(x.might_sent??x.army_might??x.troop_power??x.units_power);
+      const cells=entries.filter(([k])=>!["movement_id","attacker_name","sender_name","player_name","owner_name","target_name","target_player_name","destination_name"].includes(k)).map(([k,v])=>{
+        const isDate=dateKeys.has(k)||(/(date|time|_at)$/.test(k)&&typeof v==="string"&&Number.isFinite(Date.parse(v)));
+        return '<div class="'+(isDate?'radar-date':'')+'"><small>'+esc(labels[k]||k.replaceAll("_"," "))+'</small><strong>'+esc(isDate?dateText(v):v)+'</strong></div>';
+      }).join("");
+      const troopCount=Number.isFinite(power)&&power>0?Math.floor(power/11).toLocaleString("pl-PL"):"API nie udostępnia mocy";
+      return '<article class="radar-card"><div class="radar-card-head"><b>'+esc(title)+'</b><span>Do: '+esc(target)+'</span></div><div class="radar-card-grid">'+cells+(Number.isFinite(power)&&power>0?'<div><small>MOC WYSŁANYCH WOJSK</small><strong>'+esc(power.toLocaleString("pl-PL"))+'</strong></div>':'')+'<div><small>SZACOWANA LICZBA ŻOŁNIERZY (MOC ÷ 11)</small><strong>'+esc(troopCount)+'</strong></div></div></article>';
+    }).join("");
+    return (meta.length?objectTable(Object.fromEntries(meta)):"")+notice("ruchów")+'<div class="radar-list">'+cards+'</div>';
+  }
+  return (meta.length?objectTable(Object.fromEntries(meta)):"")+notice("rekordów")+tableFromArray(rows);
 }
 async function runBotSearch(btn,result,url){
   btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z API GGE Tracker…</div>';
