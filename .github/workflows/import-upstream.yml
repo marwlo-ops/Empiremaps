@@ -7,6 +7,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: empiremaps-upstream-mirror
+  cancel-in-progress: false
+
 jobs:
   mirror-files:
     if: github.event.head_commit.message != 'Mirror upstream source files 1:1'
@@ -15,11 +19,12 @@ jobs:
       - name: Checkout destination
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
-      - name: Copy all tracked and untracked upstream files
+          fetch-depth: 0
+      - name: Copy all upstream files and replace destination contents
         shell: bash
         run: |
           set -euo pipefail
+          git pull --rebase origin main
           git clone --depth 1 https://github.com/nathael-aa/gge-assistant-bot.git /tmp/upstream
           rsync -a --delete --exclude='.git' /tmp/upstream/ ./
           git config user.name "github-actions[bot]"
