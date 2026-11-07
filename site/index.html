@@ -34,7 +34,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
     <div class="side-bottom">EMPIREMAPS WEB 0.1<br>Discord nie jest wymagany do logowania ani korzystania z panelu.<br><br>Nieoficjalny projekt społeczności.</div>
   </aside>
   <main class="main">
-    <header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="mobileMenu">☰</button><div class="crumb">EMPIREMAPS　/　<b id="crumb">Przegląd</b></div></div><div class="top-actions"><div class="zoom-control" aria-label="Powiększenie widoku"><button type="button" id="zoomOut" aria-label="Pomniejsz">A−</button><button type="button" id="zoomIn" aria-label="Powiększ">A+</button></div><select class="server" id="server"><option>PL1</option><option>PL2</option><option>INT1</option><option>DE1</option><option>FR1</option><option>E4K_PL1</option><option value="E4K_PL1_BETA" selected>E4K PL1 BETA</option><option>E4K_FR1</option><option>E4K_DE1</option><option>E4K_INT1</option></select><span class="user-pill" id="userEmail"></span><button class="btn secondary" id="installApp" type="button">Zainstaluj aplikację</button></div></header>
+    <header class="topbar"><div style="display:flex;align-items:center;gap:12px"><button class="mobile-menu" id="mobileMenu">☰</button><div class="crumb">EMPIREMAPS　/　<b id="crumb">Przegląd</b></div></div><div class="top-actions"><div class="zoom-control" aria-label="Powiększenie widoku"><button type="button" id="zoomOut" aria-label="Pomniejsz">A−</button><button type="button" id="zoomIn" aria-label="Powiększ">A+</button></div><select class="server" id="languageSwitcher" aria-label="Język / Language" title="Język / Language"><option value="pl">🇵🇱 PL</option><option value="en">🇬🇧 EN</option></select><select class="server" id="server"><option>PL1</option><option>PL2</option><option>INT1</option><option>DE1</option><option>FR1</option><option>E4K_PL1</option><option value="E4K_PL1_BETA" selected>E4K PL1 BETA</option><option>E4K_FR1</option><option>E4K_DE1</option><option>E4K_INT1</option></select><span class="user-pill" id="userEmail"></span><button class="btn secondary" id="installApp" type="button">Zainstaluj aplikację</button></div></header>
     <div class="content">
       <section class="view active" id="view-overview">
         <div class="welcome"><div><div class="eyebrow">WITAJ W SWOIM IMPERIUM</div><h1>Panel dowódcy</h1><p>Najważniejsze narzędzia i dane Twojego serwera w jednym miejscu.</p></div><div class="status"><span class="dot" id="apiDot"></span><span id="apiStatus">Sprawdzanie połączenia…</span></div></div>
@@ -561,6 +561,133 @@ installButton.onclick=async()=>{
   const standalone=window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone;
   alert(standalone?"Empiremaps jest już zainstalowane.":"Aby zainstalować: otwórz menu Chrome ⋮ i wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”. Jeśli tej opcji nie ma, odśwież stronę i spróbuj ponownie.");
 };
+
+<script>
+/* Empiremaps global Polish/English interface */
+(()=>{
+ const translations={
+ "EMPIREMAPS | Panel dowódcy":"EMPIREMAPS | Commander panel",
+ "CENTRUM DOWODZENIA":"COMMAND CENTER","Przegląd":"Overview","Gracze":"Players","Sojusze":"Alliances",
+ "Historia fortec":"Fortress history","Statystyki serwera":"Server statistics","Mapa i radar":"Map & radar",
+ "Przegląd ruchów":"Movement overview","Powiadomienia":"Notifications","Ptaki":"Doves","Mapa sojuszy":"Alliance map","Wydarzenia":"Events",
+ "Discord nie jest wymagany do logowania ani korzystania z panelu.":"Discord is not required to log in or use the dashboard.",
+ "Nieoficjalny projekt społeczności.":"Unofficial community project.","Zainstaluj aplikację":"Install app",
+ "WITAJ W SWOIM IMPERIUM":"WELCOME TO YOUR EMPIRE","Panel dowódcy":"Commander dashboard",
+ "Najważniejsze narzędzia i dane Twojego serwera w jednym miejscu.":"Your server's key tools and data in one place.",
+ "Sprawdzanie połączenia…":"Checking connection…","Profile i historia":"Profiles & history","Skład i statystyki":"Members & statistics",
+ "Fortece":"Fortresses","Historia ataków":"Attack history","Radar":"Radar","Moduł w rozbudowie":"Under development",
+ "Szybki dostęp":"Quick access","WYBIERZ MODUŁ":"CHOOSE A MODULE","Wyszukaj gracza":"Find a player",
+ "Profil, poziom, moc i serwer":"Profile, level, power and server","Sprawdź sojusz":"View alliance",
+ "Podstawowe dane sojuszu":"Basic alliance information","Ataki z ostatnich 365 dni":"Attacks from the last 365 days",
+ "Globalne dane świata":"Global world data","Status połączenia":"Connection status",
+ "API gry: oczekiwanie na pierwsze zapytanie":"Game API: waiting for the first request",
+ "Dane gry pobierane są z GGE Tracker. Ich dostępność zależy od zewnętrznego API i limitów zapytań.":"Game data is retrieved from GGE Tracker. Availability depends on its external API and request limits.",
+ "Moduły radarów, automatycznego skanowania i mapy na żywo są jeszcze przenoszone z wersji Discord do aplikacji WWW.":"Radar, automatic scanning and live map modules are still being migrated from the Discord version to the web app.",
+ "INTELIGENCJA":"INTELLIGENCE","Wyszukiwarka graczy":"Player search","Wyszukaj profil gracza w wybranym świecie.":"Search for a player's profile in the selected world.",
+ "Nazwa gracza":"Player name","Szukaj gracza":"Search players","Sojusze":"Alliances",
+ "Wyszukaj sojusz i sprawdź dostępne informacje.":"Search for an alliance and view available information.",
+ "Nazwa sojuszu":"Alliance name","Szukaj sojuszu":"Search alliances",
+ "HISTORIA DZIAŁAŃ":"ACTIVITY HISTORY","Lista zarejestrowanych ataków gracza na fortece.":"List of a player's recorded attacks on fortresses.",
+ "Pobierz historię":"Load history","ANALITYKA ŚWIATA":"WORLD ANALYTICS",
+ "Globalne statystyki wybranego świata gry.":"Global statistics for the selected game world.",
+ "Podsumowanie świata":"World summary","Odśwież dane":"Refresh data","TAKTYKA":"TACTICS",
+ "Wyszukiwanie celów, analiza obiektów i podgląd ruchów serwera.":"Target search, object analysis and server movement overview.",
+ "Indeks graczy i sojuszy":"Player and alliance index","Sprawdź stan":"Check status",
+ "Uruchom skan serwera":"Start server scan","Indeks nazw jest pobierany z wybranego serwera. Możesz uruchomić skan ręcznie.":"The name index is retrieved from the selected server. You can start a scan manually.",
+ "Wyszukiwanie celów":"Target search","Wyszukaj zamki i obiekty":"Find castles and objects",
+ "Lista i metadane fortec":"Fortress list and metadata","Wyspy sztormowe":"Storm islands",
+ "Forty i zajęte wyspy":"Forts and occupied islands","Analiza gracza":"Player analysis","Statystyki i ranking":"Statistics and rankings",
+ "Radar celów — filtr zaawansowany":"Target radar — advanced filters","PORT WIZARDU Z BOTA":"BOT WIZARD PORT",
+ "Szukaj celów":"Search targets","Filtry zaawansowane: poziom, moc, odległość, honor, chwała, łup i ochrona":"Advanced filters: level, power, distance, honour, glory, loot and protection",
+ "Aktywni i ruiny":"Active players and ruins","Tylko aktywni":"Active only","Tylko ruiny":"Ruins only",
+ "Uwzględnij graczy pod ochroną":"Include protected players","Wymagaj sojuszu":"Require an alliance",
+ "Wybierz gracza bazowego, aby obliczyć odległość do potencjalnych celów.":"Select a base player to calculate distances to potential targets.",
+ "SILNIK GGE ASSISTANT":"GGE ASSISTANT ENGINE","Szukaj celu":"Search target",
+ "Profil i statystyki gracza":"Player profile and statistics","PROFIL • RANKING • STATYSTYKI":"PROFILE • RANKING • STATISTICS",
+ "Pobierz profil":"Load profile","Pobierz fortece":"Load fortresses","Wszystkie krainy":"All kingdoms",
+ "Wielkie Cesarstwo / Piaski":"Great Empire / Sands","Lodowa Kraina":"Ice Kingdom","Szczyty Ognia":"Fire Peaks",
+ "Dostępne / wkrótce":"Available / coming soon","Pobierz wyspy":"Load islands","Wszystkie stany":"All states",
+ "Wolne — gotowe do zajęcia":"Free — ready to capture","Zajęte":"Occupied",
+ "Dostępne — oczekujące na pojawienie":"Available — waiting to spawn","Wszystkie surowce":"All resources",
+ "Akwamaryna":"Aquamarine","Drewno":"Wood","Kamień":"Stone","Fortece sztormowe":"Storm forts",
+ "Dostępne teraz":"Available now","W mniej niż 5 minut":"In less than 5 minutes","W mniej niż godzinę":"In less than an hour",
+ "Wszystkie":"All","Min. 0 ataków":"Min. 0 attacks","Min. 1 atak":"Min. 1 attack","Min. 2 ataki":"Min. 2 attacks",
+ "Min. 3 ataki":"Min. 3 attacks","Min. 5 ataków":"Min. 5 attacks","Min. 10 ataków":"Min. 10 attacks",
+ "Poziom 40":"Level 40","Poziom 50":"Level 50","Poziom 60":"Level 60","Poziom 70":"Level 70","Poziom 80":"Level 80",
+ "Radar ruchów":"Movement radar","Odśwież ruchy":"Refresh movements","Zamki graczy":"Player castles","Inne zamki":"Other castles",
+ "Wszystkie typy":"All types","Ruchy ataku":"Attack movements","Wszystkie ruchy":"All movements",
+ "Ruchy wsparcia":"Support movements","Analiza zamku":"Castle analysis","Dane pobierane bezpośrednio z API gry":"Data retrieved directly from the game API",
+ "Analizuj zamek":"Analyse castle","Status: radar pobiera dane z API po ręcznym odświeżeniu. Automatyczne monitorowanie w tle i powiadomienia nie są jeszcze aktywne.":"Status: the radar retrieves data from the API after a manual refresh. Automatic background monitoring and notifications are not active yet.",
+ "ALERTY • FORTECE I WYSPY":"ALERTS • FORTRESSES & ISLANDS",
+ "Obserwuj wybrane obiekty. Alert przyjdzie około minuty przed ponowną dostępnością.":"Watch selected objects. An alert will arrive about one minute before they become available again.",
+ "Włącz powiadomienia na tym telefonie":"Enable notifications on this phone","Wyślij powiadomienie testowe":"Send test notification",
+ "Włącz powiadomienia i zezwól przeglądarce na ich wysyłanie.":"Enable notifications and allow the browser to send them.",
+ "Obserwowane obiekty":"Watched objects","Odśwież":"Refresh",
+ "TAKTYKA • RUCHY WOJSK":"TACTICS • TROOP MOVEMENTS",
+ "Ataki i wsparcia graczy z RB, MD oraz Pijaków Albionu.":"Attacks and support movements from RB, MD and Pijaki Albionu players.",
+ "Ataki":"Attacks","Wsparcie":"Support","Wszystkie trzy sojusze":"All three alliances",
+ "Pijaki Albionu":"Pijaki Albionu","Wszyscy gracze wybranego sojuszu":"All players in the selected alliance",
+ "Pobierz ruchy":"Load movements","Wybierz rodzaj ruchu i sojusz. Lista graczy zostanie pobrana z indeksu serwera E4K PL1 BETA.":"Choose a movement type and alliance. The player list will be retrieved from the E4K PL1 BETA server index.",
+ "OCHRONA GRACZY — DOVE":"PLAYER PROTECTION — DOVE","🐦 Ptaki (Dove)":"🐦 Doves",
+ "Aktywna ochrona graczy ze wszystkich sojuszy serwera E4K PL1 BETA wraz z dokładnym terminem jej zakończenia.":"Active protection for players from all E4K PL1 BETA alliances, including the exact end time.",
+ "Aktywne ochrony na całym serwerze":"Active protections across the server","Wszystkie sojusze":"All alliances",
+ "Najbliższy koniec ochrony":"Next protection expiry","Najpóźniejszy koniec ochrony":"Latest protection expiry",
+ "Sprawdź ochronę":"Check protection","Pobieranie aktywnych ochron Dove ze wszystkich sojuszy serwera.":"Loading active Dove protections from all server alliances.",
+ "MAPA TAKTYCZNA":"TACTICAL MAP","Mapa przeniesiona z Empirenew — RB i MD, pozycje zamków i posterunków oraz historia zmian.":"Map migrated from Empirenew — RB and MD, castle and outpost positions, and change history.",
+ "KALENDARZ":"CALENDAR","Terminy wydarzeń pobierane z Community Hub.":"Event dates retrieved from Community Hub.",
+ "Odśwież kalendarz":"Refresh calendar","Pełny kalendarz":"Full calendar",
+ "Najbliższe 7 dni":"Next 7 days","Wydarzenia sojusznicze":"Alliance events",
+ "Oczekiwanie na dane…":"Waiting for data…","Wczytywanie kalendarza…":"Loading calendar…",
+ "Backend działa":"Backend is online","Brak połączenia z backendem":"Backend connection unavailable",
+ "Pobieranie…":"Loading…","Łączenie z API gry…":"Connecting to game API…",
+ "Brak zarejestrowanych danych.":"No recorded data.","Pobieranie danych z API GGE Tracker…":"Loading data from GGE Tracker API…",
+ "Pobieranie ruchów z radaru…":"Loading movements from radar…","Pobieranie profilu, rankingu i statystyk gracza…":"Loading player profile, ranking and statistics…",
+ "Pobieranie wydarzeń z Community Hub…":"Loading events from Community Hub…","Brak rozpoznanych wydarzeń w tym widoku.":"No recognised events in this view.",
+ "Wpisz gracza bazowego.":"Enter a base player.","Skanowanie…":"Scanning…",
+ "Dostępna teraz":"Available now","Brak danych":"No data","Nieznany":"Unknown","Bez sojuszu":"No alliance",
+ "Współrzędne":"Coordinates","DYSTANS":"DISTANCE","OSTATNI GRACZ":"LAST PLAYER","ZAJMUJĄCY":"OCCUPIER",
+ "SOJUSZ":"ALLIANCE","DATA ZDOBYCIA":"CAPTURE DATE","KONIEC OKUPACJI":"OCCUPATION ENDS",
+ "PONOWNA DOSTĘPNOŚĆ":"AVAILABLE AGAIN","Status":"Status","Nazwa":"Name","Poziom":"Level","Moc":"Power"
+ };
+ const attrs=["placeholder","title","aria-label"];
+ const originalText=new WeakMap(),originalAttrs=new WeakMap();
+ let lang="pl",busy=false;
+ const translateText=(v)=>translations[v.trim()]!==undefined?translations[v.trim()]:v;
+ function walk(root){
+  if(root.nodeType===Node.TEXT_NODE){
+   if(!originalText.has(root))originalText.set(root,root.nodeValue);
+   const base=originalText.get(root);
+   const next=lang==="en"?translateText(base):base;
+   if(root.nodeValue!==next)root.nodeValue=next;
+   return;
+  }
+  if(root.nodeType!==Node.ELEMENT_NODE && root!==document)return;
+  if(root.nodeType===Node.ELEMENT_NODE){
+   let saved=originalAttrs.get(root);if(!saved){saved={};originalAttrs.set(root,saved);}
+   attrs.forEach(a=>{if(root.hasAttribute(a)){if(!(a in saved))saved[a]=root.getAttribute(a);const v=saved[a],t=lang==="en"?translateText(v):v;if(root.getAttribute(a)!==t)root.setAttribute(a,t);}});
+   if(root.tagName==="OPTION" && root.value && root.parentElement?.id==="languageSwitcher")return;
+  }
+  root.childNodes?.forEach(walk);
+ }
+ function applyLanguage(value){
+  lang=value==="en"?"en":"pl";
+  document.documentElement.lang=lang;
+  const selector=document.getElementById("languageSwitcher");if(selector)selector.value=lang;
+  walk(document);
+  try{localStorage.setItem("empiremaps-language",lang)}catch{}
+  document.title=lang==="en"?"Empiremaps | Commander panel":"Empiremaps | Panel dowódcy";
+ }
+ const selector=document.getElementById("languageSwitcher");
+ if(selector){
+  let stored="pl";try{stored=localStorage.getItem("empiremaps-language")||"pl"}catch{}
+  selector.addEventListener("change",()=>applyLanguage(selector.value));
+  applyLanguage(stored);
+  const observer=new MutationObserver(records=>{if(busy)return;busy=true;records.forEach(r=>{if(r.type==="childList")r.addedNodes.forEach(n=>walk(n));});busy=false;});
+  observer.observe(document.body,{subtree:true,childList:true});
+ }
+})();
+</script>
+
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=5",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
 </script>
 <datalist id="suggest-playerName"></datalist>
