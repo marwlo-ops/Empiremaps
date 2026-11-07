@@ -26,6 +26,10 @@ elif DATABASE_URL.startswith("postgresql://") and "+psycopg" not in DATABASE_URL
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, connect_args=connect_args)
+if DATABASE_URL.startswith("sqlite"):
+    # SQLite has no schemas. Translate the logical PostgreSQL schema for ALL
+    # connections, including request sessions, not only during create_all().
+    engine = engine.execution_options(schema_translate_map={"empiremaps": None})
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 if not DATABASE_URL.startswith("sqlite"):
@@ -43,15 +47,11 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-Base.metadata.create_all(
-    engine.execution_options(schema_translate_map={"empiremaps": None})
-    if DATABASE_URL.startswith("sqlite") else engine
-)
+Base.metadata.create_all(engine)
 
 app = FastAPI(title="Empiremaps API", version="0.1.0", docs_url="/api/docs", redoc_url=None)
 SECRET = os.getenv("JWT_SECRET_KEY", "")
 if not SECRET:
-    # Local-only fallback. Render Blueprint generates a persistent secret.
     SECRET = "local-development-only-change-before-deploy"
 
 class Credentials(BaseModel):
@@ -209,7 +209,7 @@ def features(user: User = Depends(current_user)):
     return {
         "available": ["player_profile","alliance_profile","server_statistics","fortress_history"],
         "in_development": ["live_map","target_radar","fortress_scanner","storm_islands","event_calendar","rankings","web_notifications"],
-        "note": "Funkcje zewnętrzne wymagają dostępności GGE Tracker i właściwego serwera."
+        "note": "Funkcje zewnętrzne wymagają доступności GGE Tracker i właściwego serwera."
     }
 
 if SITE.exists():
