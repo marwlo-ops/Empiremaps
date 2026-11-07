@@ -1,0 +1,15 @@
+{
+  "id": "/",
+  "name": "Empiremaps — Centrum dowodzenia",
+  "short_name": "Empiremaps",
+  "description": "Panel dowódcy Goodgame Empire / Four Kingdoms",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1118",
+  "theme_color": "#0b1118",
+  "icons": [
+    {"src": "/icons/empiremaps.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable"}
+  ]
+}
