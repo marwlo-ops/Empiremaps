@@ -140,14 +140,15 @@ function attachSuggestions(inputId,kind){
        const params=new URLSearchParams({q:query,kind,server:$("server").value});
        const result=await api("/api/bot/suggestions?"+params.toString());
        list.innerHTML=(result.items||[]).map(value=>'<option value="'+esc(value)+'"></option>').join("");
-       if(!result.scan_available)input.title=result.message||"Brak danych skanu dla tego serwera";
-       else input.title="Podpowiedzi z ostatniego skanu serwera";
+       if(!result.scan_available)input.title=result.message||"Trwa pobieranie danych serwera";
+       else input.title="Podpowiedzi z indeksu graczy i sojuszy serwera";
      }catch(error){list.innerHTML="";input.title=error.message}
    },180);
  });
 }
 ["playerName","botTargetName","botFortressPlayer"].forEach(id=>attachSuggestions(id,"players"));
 ["allianceName"].forEach(id=>attachSuggestions(id,"alliances"));
+attachSuggestions("botStormOccupier","players");
 
 async function runBotSearch(btn,result,url){
   btn.disabled=true;const label=btn.dataset.label||btn.textContent;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Pobieranie danych z silnika GGE Assistant…</div>';
