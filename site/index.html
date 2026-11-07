@@ -128,10 +128,10 @@
         </div>
         <div class="notice warn" style="margin-top:16px">Status: radar pobiera dane z API po ręcznym odświeżeniu. Automatyczne monitorowanie w tle i powiadomienia nie są jeszcze aktywne.</div></section>
       <section class="view" id="view-ptaki">
-        <div class="welcome"><div><div class="eyebrow">MONITORING SOJUSZU</div><h1>🐦 Ptaki</h1><p>Lista zdarzeń dotyczących graczy sojuszu, uporządkowana od najnowszych.</p></div></div>
-        <div class="panel"><div class="panel-title"><h2>Filtry ptaków</h2><span class="sub">E4K PL1 BETA</span></div>
-          <div class="searchrow"><select class="field" id="birdsAlliance"><option value="115">RB — ReBorN</option><option value="41343">MD — MADDEVILS</option><option value="all">Wszystkie sojusze</option></select><select class="field" id="birdsSort"><option value="desc">Od najnowszych</option><option value="asc">Od najstarszych</option></select><button class="btn primary" id="birdsRefresh" type="button">Odśwież</button></div>
-          <div class="result" id="birdsResult"><div class="notice">Panel przygotowany. Po potwierdzeniu, co dokładnie oznacza „ptak” w Twoim sposobie monitorowania, podłączę właściwe zdarzenia i daty z API. Nie pokazuję fikcyjnych wpisów.</div></div>
+        <div class="welcome"><div><div class="eyebrow">OCHRONA GRACZY — DOVE</div><h1>🐦 Ptaki (Dove)</h1><p>Aktywna ochrona graczy ze wszystkich sojuszy serwera E4K PL1 BETA wraz z dokładnym terminem jej zakończenia.</p></div></div>
+        <div class="panel"><div class="panel-title"><h2>Aktywne ochrony na całym serwerze</h2><span class="sub">Wszystkie sojusze</span></div>
+          <div class="searchrow"><input class="field" id="birdsSearch" placeholder="Szukaj gracza lub sojuszu"><select class="field" id="birdsSort"><option value="asc">Najbliższy koniec ochrony</option><option value="desc">Najpóźniejszy koniec ochrony</option></select><button class="btn primary" id="birdsRefresh" type="button">Odśwież dane</button></div>
+          <div class="result" id="birdsResult"><div class="notice">Pobieranie aktywnych ochron Dove ze wszystkich sojuszy serwera.</div></div>
         </div>
       </section>
       <section class="view" id="view-mapa">
