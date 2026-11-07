@@ -103,25 +103,9 @@ def make_token(user: User) -> str:
     sig = b64(hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).digest())
     return f"{body}.{sig}"
 
-def current_user(authorization: str | None = Header(default=None), db: Session = Depends(get_db)) -> User:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(401, "Zaloguj się, aby kontynuować.")
-    try:
-        token = authorization[7:]
-        head, payload, signature = token.split(".")
-        body = f"{head}.{payload}"
-        expected = b64(hmac.new(SECRET.encode(), body.encode(), hashlib.sha256).digest())
-        if not hmac.compare_digest(signature, expected):
-            raise ValueError("signature")
-        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
-        if data["exp"] < time.time():
-            raise ValueError("expired")
-        user = db.get(User, int(data["sub"]))
-        if not user:
-            raise ValueError("user")
-        return user
-    except Exception:
-        raise HTTPException(401, "Sesja wygasła. Zaloguj się ponownie.")
+def current_user() -> User:
+    """Publiczny tryb Empiremaps: panel nie wymaga konta ani tokenu."""
+    return User(id=0, email="Tryb publiczny", password_hash="")
 
 @app.get("/api/health")
 def health():
