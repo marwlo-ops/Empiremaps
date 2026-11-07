@@ -441,7 +441,9 @@ async def bot_fortresses(
         params["filterByPlayerName"] = player.strip()[:80]
         params["nearPlayerName"] = player.strip()[:80]
     if kingdom_ids.strip():
-        params["filterByKid"] = kingdom_ids.strip()[:200]
+        selected_kids = [part.strip() for part in kingdom_ids.split(",") if part.strip().isdigit()]
+        if selected_kids:
+            params["filterByKid"] = "[" + ",".join(f'"{kid}"' for kid in selected_kids) + "]"
     return {"data": await bot_tracker_get("dungeons", server, params), "server": server.upper()}
 
 @app.get("/api/bot/storms/meta")
