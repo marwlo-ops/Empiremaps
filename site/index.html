@@ -181,8 +181,30 @@ $("serverSearch").onclick=()=>runSearch($("serverSearch"),$("serverResult"),"/ap
 const suggestionTimers={},suggestionVersions={};
 function attachSuggestions(inputId,kind){
  const input=$(inputId);if(!input)return;
- const list=$("suggest-box-"+inputId);if(!list)return;
+ const list=$("suggest-box-"+inputId);
  input.setAttribute("autocomplete","off");
+ if(!list){
+   const nativeList=$("suggest-"+inputId);if(!nativeList)return;
+   input.addEventListener("input",()=>{
+     clearTimeout(suggestionTimers[inputId]);
+     const version=(suggestionVersions[inputId]||0)+1;suggestionVersions[inputId]=version;
+     const query=input.value.trim();if(!query){nativeList.innerHTML="";return;}
+     const fetchNative=async(attempt=0)=>{
+       if(suggestionVersions[inputId]!==version)return;
+       try{
+         const params=new URLSearchParams({q:query,kind,server:$("server").value});
+         const result=await api("/api/bot/suggestions?"+params.toString());
+         if(suggestionVersions[inputId]!==version)return;
+         nativeList.innerHTML=(result.items||[]).map(value=>'<option value="'+esc(value)+'"></option>').join("");
+         if(result.scan_running&&attempt<120)suggestionTimers[inputId]=setTimeout(()=>fetchNative(attempt+1),2500);
+         else if(!result.scan_available&&attempt<120)suggestionTimers[inputId]=setTimeout(()=>fetchNative(attempt+1),5000);
+         if(result.scan_running||result.scan_available)refreshBotScanStatus();
+       }catch(error){input.title=error.message;}
+     };
+     suggestionTimers[inputId]=setTimeout(()=>fetchNative(0),180);
+   });
+   return;
+ }
  let active=-1,items=[];
  const close=()=>{list.hidden=true;list.innerHTML="";active=-1;items=[];};
  const choose=value=>{input.value=value;close();input.focus();};
