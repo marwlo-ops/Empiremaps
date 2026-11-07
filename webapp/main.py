@@ -880,7 +880,7 @@ async def bot_player_history(player_id: int, player: str = "", server: str = "E4
     movements = {}
     if player.strip():
         try:
-            url = "https://api-beta.gge-tracker.com/api/v1/server/movements"
+            url = "https://api.gge-tracker.com/api/v1/server/movements"
             async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
                 response = await client.get(url, headers=bot_headers(server), params={
                     "page": 1, "castleType": 1, "movementType": 3,
