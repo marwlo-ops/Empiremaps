@@ -309,7 +309,7 @@ $("targetRadarRun").onclick=async()=>{
   try{
     const data=await api("/api/bot/targets/search?"+query.toString());
     if(!data.results?.length){out.innerHTML='<div class="notice">Nie znaleziono celów spełniających filtry. Przeskanowano strony: '+esc((data.scanned_pages||[]).join(", "))+'</div>';return;}
-    const rows=data.results.map((p,i)=>({rank:i+1,gracz:p.name,sojusz:p.alliance||"—",poziom:p.absolute_level,moc:p.might,honor:p.honor,chwała:p.glory,łup:p.loot,odległość:p.distance,X:p.x,Y:p.y,ochrona:p.has_protection?"Tak":"Nie"}));
+    const rows=data.results.map((p,i)=>({rank:i+1,gracz:p.name,sojusz:p.alliance||"—",poziom:p.absolute_level,moc:p.might,honor:p.honor,chwała:p.glory,łup:p.loot,odległość:p.distance,X:p.x,Y:p.y,ochrona:p.has_protection?"Tak":"Nie",ostrzeżenie:p.wall_warning?"Sprawdź opis sojuszu":"—"}));
     out.innerHTML='<div class="notice">Gracz bazowy: <b>'+esc(data.origin_player)+'</b> ('+esc(data.origin_coordinates.x)+', '+esc(data.origin_coordinates.y)+'). Znaleziono '+esc(data.valid_targets_found)+' celów; strony: '+esc(data.scanned_pages.join(", "))+'.'+(data.truncated?' Część serwera nie została przeskanowana.':'')+'</div>'+tableFromArray(rows);
   }catch(err){out.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}
   finally{btn.disabled=false;btn.textContent=label}
