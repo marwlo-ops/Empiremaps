@@ -1,0 +1,37 @@
+name: Update README Tree
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+permissions:
+  contents: write
+
+jobs:
+  update-tree:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Generate tree and update README
+        run: |
+          sudo apt-get install -y tree
+          echo '```text' > tree_tmp.txt
+          # Profondeur 4, dossiers en premier, nettoyage des ignorés et des fichiers images
+          tree -L 4 --dirsfirst -I '.git|.github|__pycache__|.env|logs|data|tmp|tree_tmp.txt|*.png|*.webp|*.gif|*.jpg' >> tree_tmp.txt
+          echo '```' >> tree_tmp.txt
+          sed -i '/<!-- TREE-START -->/,/<!-- TREE-END -->/!b;//!d;/<!-- TREE-START -->/r tree_tmp.txt' README.md
+          rm tree_tmp.txt
+
+      - name: Commit and Push changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add README.md
+          git diff --quiet && git diff --staged --quiet || git commit -m "docs: auto-update README tree"
+          git push
