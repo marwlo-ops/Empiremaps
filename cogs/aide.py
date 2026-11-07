@@ -1,4 +1,6 @@
+import json
 import logging
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -8,20 +10,22 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-import observability as obs
 from utils import (
+    ADMINS_DIR,
     BOT_VERSION,
     DICT_EMOJIS,
+    MON_ID_DISCORD,
     PaginationView,
     get_api_headers,
+    get_file_lock,
     get_server_config,
-    load_configuration_async,
     setup_embed_footer,
     t,
 )
 
 logger = logging.getLogger("GGE_Bot")
 
+CONTACTS_FILE = ADMINS_DIR / "contacts.json"
 
 # ===========================================
 # ⚙️ CONFIGURATION CENTRALISÉE DE L'AIDE
@@ -29,769 +33,87 @@ logger = logging.getLogger("GGE_Bot")
 HELP_CONFIG = {
     "home": {
         "emoji": "🏠",
-        "color": discord.Color.from_rgb(88, 101, 242),
+        "color": discord.Color.from_rgb(198, 226, 255),
         "title_key": "help_home_title",
         "desc_key": "aide_p0_desc",
     },
     "config": {
         "emoji": "⚙️",
-        "color": discord.Color.from_rgb(149, 165, 166),
+        "color": discord.Color.from_rgb(102, 102, 102),
         "title_key": "help_cat_config",
         "commands": [
-            {
-                "name": "/setup",
-                "desc_key": "help_cmd_setup",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/server-setup",
-                "desc_key": "help_cmd_server_setup",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/status",
-                "desc_key": "help_cmd_status",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/link_account",
-                "desc_key": "help_cmd_link_account",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/help",
-                "desc_key": "help_cmd_help",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
+            {"name": "/setup", "desc_key": "help_cmd_setup"},
+            {"name": "/link_account", "desc_key": "help_cmd_link_account"},
+            {"name": "/status", "desc_key": "help_cmd_status"},
+            {"name": "/help", "desc_key": "help_cmd_help"},
         ],
     },
     "communaute": {
         "emoji": "💬",
-        "color": discord.Color.from_rgb(155, 89, 182),
+        "color": discord.Color.from_rgb(230, 230, 250),
         "title_key": "help_cat_communaute",
         "commands": [
-            {
-                "name": "/hub setup",
-                "desc_key": "help_cmd_hub_setup",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/hub stop",
-                "desc_key": "help_cmd_hub_stop",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/offers setup",
-                "desc_key": "help_cmd_offers_setup",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/offers stop",
-                "desc_key": "help_cmd_offers_stop",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/news",
-                "desc_key": "help_cmd_news",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/vote",
-                "desc_key": "help_cmd_vote",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/support",
-                "desc_key": "help_cmd_support",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/discover",
-                "desc_key": "help_cmd_discover",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
+            {"name": "/news", "desc_key": "help_cmd_news"},
+            {"name": "/support", "desc_key": "help_cmd_support"},
+            {"name": "/contact", "desc_key": "help_cmd_contact"},
+            {"name": "/vote", "desc_key": "help_cmd_vote"},
+            {"name": "/discover", "desc_key": "help_cmd_discover"},
         ],
     },
     "profils": {
         "emoji": "👥",
-        "color": discord.Color.from_rgb(46, 204, 113),
+        "color": discord.Color.from_rgb(50, 214, 50),
         "title_key": "help_cat_profils",
         "commands": [
-            {
-                "name": "/server",
-                "desc_key": "help_cmd_server",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/player profile",
-                "desc_key": "help_cmd_player_profile",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/player history",
-                "desc_key": "help_cmd_player_history",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/player dove",
-                "desc_key": "help_cmd_player_dove",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/player compare",
-                "desc_key": "help_cmd_player_compare",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/alliance profile",
-                "desc_key": "help_cmd_alliance_profile",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/alliance might",
-                "desc_key": "help_cmd_alliance_might",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/alliance property",
-                "desc_key": "help_cmd_alliance_property",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/alliance description",
-                "desc_key": "help_cmd_alliance_desc",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
+            {"name": "/server", "desc_key": "help_cmd_server"},
+            {"name": "/player profile", "desc_key": "help_cmd_player_profile"},
+            {"name": "/player history", "desc_key": "help_cmd_player_history"},
+            {"name": "/player dove", "desc_key": "help_cmd_player_dove"},
+            {"name": "/player compare", "desc_key": "help_cmd_player_compare"},
+            {"name": "/alliance profile", "desc_key": "help_cmd_alliance_profile"},
+            {"name": "/alliance might", "desc_key": "help_cmd_alliance_might"},
+            {"name": "/alliance property", "desc_key": "help_cmd_alliance_property"},
+            {"name": "/alliance description", "desc_key": "help_cmd_alliance_desc"},
         ],
     },
     "guerre": {
         "emoji": "⚔️",
-        "color": discord.Color.from_rgb(231, 76, 60),
+        "color": discord.Color.from_rgb(139, 0, 0),
         "title_key": "help_cat_guerre",
         "commands": [
-            {
-                "name": "/alliance scanner",
-                "desc_key": "help_cmd_alliance_scanner",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/target search",
-                "desc_key": "help_cmd_target_search",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": "advanced_castle",
-                "wip": True,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/target setup",
-                "desc_key": "help_cmd_target_setup",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": "advanced_castle",
-                "wip": True,
-                "hide_in_help": False,
-            },
+            {"name": "/alliance scanner", "desc_key": "help_cmd_alliance_scanner"},
+            {"name": "/target (setup / search)", "desc_key": "help_cmd_target_group", "wip": True},
         ],
     },
     "events": {
         "emoji": "🏆",
-        "color": discord.Color.from_rgb(241, 196, 15),
+        "color": discord.Color.from_rgb(175, 238, 238),
         "title_key": "help_cat_events",
         "commands": [
+            {"name": "/event player", "desc_key": "help_cmd_event_player"},
+            {"name": "/event alliance", "desc_key": "help_cmd_event_alliance"},
+            {"name": "/calendar (setup / track / untrack / current)", "desc_key": "help_cmd_calendar_group"},
             {
-                "name": "/event player",
-                "desc_key": "help_cmd_event_player",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
+                "name": "/rank (event / league / contests / statistics / gacha / realms / alliance)",
+                "desc_key": "help_cmd_rank_group",
             },
-            {
-                "name": "/event alliance",
-                "desc_key": "help_cmd_event_alliance",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank event",
-                "desc_key": "help_cmd_rank_event",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank league",
-                "desc_key": "help_cmd_rank_league",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank contests",
-                "desc_key": "help_cmd_rank_contests",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank statistics",
-                "desc_key": "help_cmd_rank_statistics",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank gacha",
-                "desc_key": "help_cmd_rank_gacha",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank realms",
-                "desc_key": "help_cmd_rank_realms",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rank alliance",
-                "desc_key": "help_cmd_rank_alliance",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm forts",
-                "desc_key": "help_cmd_storm_forts",
-                "required_module": "storm",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm isles",
-                "desc_key": "help_cmd_storm_isles",
-                "required_module": "storm",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm occupier",
-                "desc_key": "help_cmd_storm_occupier",
-                "required_module": "storm",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm status",
-                "desc_key": "help_cmd_storm_status",
-                "required_module": "storm",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/leaderboard storm_islands",
-                "desc_key": "help_cmd_leaderboard_storm",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/woa history",
-                "desc_key": "help_cmd_woa_history",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/woa summary",
-                "desc_key": "help_cmd_woa_summary",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/leaderboard woa",
-                "desc_key": "help_cmd_leaderboard_woa",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/gt rank",
-                "desc_key": "help_cmd_gt_rank",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/gt alliance",
-                "desc_key": "help_cmd_gt_alliance",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rift rank",
-                "desc_key": "help_cmd_rift_rank",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rift alliance",
-                "desc_key": "help_cmd_rift_alliance",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/calendar current",
-                "desc_key": "help_cmd_calendar_current",
-                "server_only": False,
-                "private_only": False,
-                "admin_only": False,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
+            {"name": "/leaderboard (woa / storm_islands)", "desc_key": "help_cmd_leaderboard_group"},
+            {"name": "/woa (history / summary)", "desc_key": "help_cmd_woa_group"},
         ],
     },
     "radars": {
         "emoji": "📡",
-        "color": discord.Color.from_rgb(230, 126, 34),
+        "color": discord.Color.from_rgb(255, 174, 25),
         "title_key": "help_cat_radars",
         "commands": [
+            {"name": "/radar (add / remove / list)", "desc_key": "help_cmd_radar_group", "advanced": False},
+            {"name": "/radar alliance (add / remove)", "desc_key": "help_cmd_radar_alliance_group", "advanced": False},
+            {"name": "/rival (start / stop / add / list)", "desc_key": "help_cmd_rival_group", "advanced": False},
+            {"name": "/fortress (scan / stop)", "desc_key": "help_cmd_fortress_group", "advanced": True},
             {
-                "name": "/calendar setup",
-                "desc_key": "help_cmd_calendar_setup",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/calendar track",
-                "desc_key": "help_cmd_calendar_track",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/calendar untrack",
-                "desc_key": "help_cmd_calendar_untrack",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/calendar stop",
-                "desc_key": "help_cmd_calendar_stop",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "required_module": None,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar private add_player",
-                "desc_key": "help_cmd_radar_private_add_player",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar private add_alliance",
-                "desc_key": "help_cmd_radar_private_add_alliance",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar private remove_player",
-                "desc_key": "help_cmd_radar_private_remove_player",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar private remove_alliance",
-                "desc_key": "help_cmd_radar_private_remove_alliance",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar private list",
-                "desc_key": "help_cmd_radar_private_list",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar server setup",
-                "desc_key": "help_cmd_radar_server_setup",
-                "required_module": None,
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar server add_player",
-                "desc_key": "help_cmd_radar_server_add_player",
-                "required_module": None,
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar server add_alliance",
-                "desc_key": "help_cmd_radar_server_add_alliance",
-                "required_module": None,
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar server remove_player",
-                "desc_key": "help_cmd_radar_server_remove_player",
-                "required_module": None,
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar server remove_alliance",
-                "desc_key": "help_cmd_radar_server_remove_alliance",
-                "required_module": None,
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/radar server list",
-                "desc_key": "help_cmd_radar_server_list",
-                "required_module": None,
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rival start",
-                "desc_key": "help_cmd_rival_start",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rival add",
-                "desc_key": "help_cmd_rival_add",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rival list",
-                "desc_key": "help_cmd_rival_list",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/rival stop",
-                "desc_key": "help_cmd_rival_stop",
-                "required_module": None,
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/fortress scan",
-                "desc_key": "help_cmd_fortress_scan",
-                "required_module": "fortress",
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/fortress stop",
-                "desc_key": "help_cmd_fortress_stop",
-                "required_module": "fortress",
-                "server_only": False,
-                "private_only": True,
-                "admin_only": False,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm setup_isles",
-                "desc_key": "help_cmd_storm_setup_isles",
-                "required_module": "storm",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm stop_isles",
-                "desc_key": "help_cmd_storm_stop_isles",
-                "required_module": "storm",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm setup_forts",
-                "desc_key": "help_cmd_storm_setup_forts",
-                "required_module": "storm",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
-            },
-            {
-                "name": "/storm stop_forts",
-                "desc_key": "help_cmd_storm_stop_forts",
-                "required_module": "storm",
-                "server_only": True,
-                "private_only": False,
-                "admin_only": True,
-                "wip": False,
-                "hide_in_help": False,
+                "name": "/storm (forts / isles / occupier / status / setup / stop)",
+                "desc_key": "help_cmd_storm_group",
+                "advanced": True,
             },
         ],
     },
@@ -808,7 +130,7 @@ PROJECTS_LIST = [
             {
                 "label_key": "btn_website",
                 "label_defaut": "Site Web",
-                "url": "https://gge-tracker.com/?utm_source=gge_assistant",
+                "url": "https://gge-tracker.com/",
                 "emoji": DICT_EMOJIS.get("e_website", "🌐"),
             },
             {
@@ -820,7 +142,7 @@ PROJECTS_LIST = [
             {
                 "label_key": "btn_api",
                 "label_defaut": "API",
-                "url": "https://docs.gge-tracker.com/?utm_source=gge_assistant",
+                "url": "https://docs.gge-tracker.com/",
                 "emoji": DICT_EMOJIS.get("e_developer", "💻"),
             },
         ],
@@ -912,68 +234,28 @@ class HelpSelect(discord.ui.Select):
             )
             embed.description = desc
         else:
-            e_staff = DICT_EMOJIS.get("e_staff", "🛡️")
-            e_working = DICT_EMOJIS.get("e_working", "🛠️")
-            e_server = DICT_EMOJIS.get("e_server", "🏢")
-            e_dm = DICT_EMOJIS.get("e_dm", "✉️")
-
-            module_emojis = {
-                "storm": DICT_EMOJIS.get("e_aquamarine_brut", "<:aquamarine_brut:1533424307512807486>"),
-                "fortress": DICT_EMOJIS.get("e_fortresses", "<:fortresses:1512574700839239892>"),
-                "advanced_castle": DICT_EMOJIS.get("e_castles", "<:castles:1512574693859786822>"),
-            }
-
             legende = t(
                 self.langue,
-                "help_legend_v3",
-                e_storm=module_emojis["storm"],
-                e_fortress=module_emojis["fortress"],
-                e_castle=module_emojis["advanced_castle"],
-                e_staff=e_staff,
-                e_working=e_working,
-                e_server=e_server,
-                e_dm=e_dm,
-                defaut=(
-                    f"🟢 `Standard` ｜ {module_emojis['storm']} `Storm` ｜ {module_emojis['fortress']} `Fortress` ｜ {module_emojis['advanced_castle']} `Adv. Castle`\n"
-                    f"{e_staff} `Admin` ｜ {e_working} `En travaux` ｜ {e_server} `Serveur Uniq.` ｜ {e_dm} `MP Uniq.`"
-                ),
+                "help_legend",
+                defaut="🟢 `Standard` ｜ 🌟 `Fonctions Avancées` ｜ {e_working} `En travaux`",
             )
 
             embed.description = f"{legende}\n\u200b"
 
             for cmd in cat_data["commands"]:
-                if cmd.get("hide_in_help", False):
-                    continue
-
                 cmd_desc = t(self.langue, cmd["desc_key"], defaut="> *Description manquante*")
 
                 is_wip = cmd.get("wip", False)
-                required_module = cmd.get("required_module")
-
-                is_admin = cmd.get("admin_only", False)
-                is_server = cmd.get("server_only", False)
-                is_private = cmd.get("private_only", False)
+                is_advanced = cmd.get("advanced", False)
 
                 if is_wip:
-                    emoji_statut = e_working
-                elif required_module:
-                    emoji_statut = module_emojis.get(required_module, "🌟")
+                    emoji_statut = t(self.langue, "format_wip", defaut="{e_working}")
+                elif is_advanced:
+                    emoji_statut = "🌟"
                 else:
                     emoji_statut = "🟢"
 
-                emoji_admin = f" {e_staff}" if is_admin else ""
-
-                emoji_lieu = ""
-                if is_server:
-                    emoji_lieu = f" {e_server}"
-                elif is_private:
-                    emoji_lieu = f" {e_dm}"
-
-                embed.add_field(
-                    name=f"{emoji_statut}{emoji_admin} **`{cmd['name']}`**{emoji_lieu}",
-                    value=f"{cmd_desc}",
-                    inline=False,
-                )
+                embed.add_field(name=f"{emoji_statut} **`{cmd['name']}`**", value=f"{cmd_desc}", inline=False)
 
         await setup_embed_footer(embed, interaction, self.langue)
         if not self.view.message:
@@ -1006,13 +288,13 @@ class AideCog(commands.Cog):
         self.clr_news = discord.Color.from_rgb(255, 191, 0)
         self.clr_vote = discord.Color.from_rgb(232, 198, 112)
         self.clr_support = discord.Color.from_rgb(241, 213, 143)
+        self.clr_contact = discord.Color.from_rgb(247, 226, 173)
 
     @app_commands.command(name="help", description="Displays the complete user manual for the GGE Assistant bot")
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.user.id)
     async def aide_commande(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=False)
-        except Exception:
+        except:
             return
 
         langue, _ = await get_server_config(interaction)
@@ -1037,11 +319,10 @@ class AideCog(commands.Cog):
     @app_commands.command(
         name="status", description="Checks the overall health status of the system (Bot, NAS Storage, GGE-Tracker API)"
     )
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.user.id)
     async def statut_commande(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(thinking=True)
-        except Exception:
+        except:
             return
 
         langue, serveur = await get_server_config(interaction)
@@ -1055,8 +336,8 @@ class AideCog(commands.Cog):
 
         ping = round(self.bot.latency * 1000)
 
-        val_oui = t(langue, "statut_yes", defaut="🟢 Oui")
-        val_non = t(langue, "statut_no", defaut="🔴 Non")
+        val_oui = t(langue, "statut_yes", defaut="{e_parameters} Oui")
+        val_non = t(langue, "statut_no", defaut="{e_icon_friends2} Non")
         maintenance_txt = val_oui if getattr(self.bot, "maintenance_mode", False) else val_non
 
         bot_txt = t(
@@ -1082,7 +363,7 @@ class AideCog(commands.Cog):
             pourcentage_plein = (used / total) * 100
 
             scans_dir = Path(f"/app/data/server_scans/{serveur}")
-            last_scan_txt = t(langue, "statut_storage_no_file", defaut="🔴 Aucun fichier trouvé")
+            last_scan_txt = t(langue, "statut_storage_no_file", defaut="{e_error} Aucun fichier trouvé")
 
             if scans_dir.exists():
                 server_files = list(scans_dir.rglob("*.json"))
@@ -1110,10 +391,8 @@ class AideCog(commands.Cog):
                 langue,
                 "statut_storage_err",
                 error=str(e),
-                defaut=f"🔴 Erreur de lecture de l'espace de stockage : {e}",
+                defaut=f"{{e_error}} Erreur de lecture de l'espace de stockage : {e}",
             )
-            logger.error(f"❌ [Statut] Erreur de lecture de l'espace disque : {e}")
-            obs.record_error(source="command", scope="status_disk", exception=e, cog="aide")
 
         embed.add_field(
             name=t(langue, "statut_storage_title", defaut="💾 Stockage Interne"), value=storage_txt, inline=False
@@ -1128,7 +407,7 @@ class AideCog(commands.Cog):
             try:
                 dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
                 return f"<t:{int(dt.timestamp())}:R>"
-            except Exception:
+            except:
                 return t(langue, "statut_api_unknown", defaut="Date inconnue")
 
         session = self.bot.session if hasattr(self.bot, "session") and self.bot.session else aiohttp.ClientSession()
@@ -1140,7 +419,7 @@ class AideCog(commands.Cog):
                     api_data = await r.json()
                     v_api = api_data.get("version", "Inconnue")
 
-                    val_prog = t(langue, "statut_api_prog", defaut="🔴 En cours...")
+                    val_prog = t(langue, "statut_api_prog", defaut="{e_error} En cours...")
                     val_done = t(langue, "statut_api_done", defaut="🟢 Terminé / À jour")
                     in_progress = val_prog if api_data.get("update_in_progress", False) else val_done
 
@@ -1178,80 +457,39 @@ class AideCog(commands.Cog):
                             f"{{e_war_realms}} **Etrangers** : {to_discord_ts(updates.get('war_realms'))}\n"
                             f"{{e_berimond}} **Bérimond** : {to_discord_ts(updates.get('berimond_kingdom'))}"
                         ),
-                    ).format(**DICT_EMOJIS)
+                    )
                     embed.add_field(
-                        name=t(langue, "statut_api_events_title", defaut="⏱️ Dernière capture des données"),
+                        name=t(langue, "statut_api_events_title", defaut="⏱️ Dernière capture des données GGE-Tracker"),
                         value=events_txt,
                         inline=False,
                     )
                 else:
-                    logger.warning(f"⚠️ [Statut] L'API GGE Tracker répond de manière instable : Code {r.status}.")
                     embed.add_field(
                         name=api_title,
                         value=t(
                             langue,
                             "statut_api_err_instable",
                             code=r.status,
-                            defaut=f"🔴 L'API répond mais rencontre une instabilité (Code : {r.status}).",
+                            defaut=f"{{e_error}} L'API répond mais rencontre une instabilité (Code : {r.status}).",
                         ),
                         inline=False,
                     )
         except Exception as e:
-            logger.error(f"❌ [Statut] API GGE Tracker Hors ligne : {e}")
             embed.add_field(
                 name=api_title,
                 value=t(
                     langue,
                     "statut_api_err_offline",
                     error=str(e),
-                    defaut=f"🔴 **Hors ligne** : Impossible de joindre l'API ({e}).",
+                    defaut=f"{{e_error}} **Hors ligne** : Impossible de joindre l'API de suivi du jeu ({e}).",
                 ),
                 inline=False,
             )
-
-        # ==========================================
-        # 🌟 VÉRIFICATION DES MODULES DU SERVEUR
-        # ==========================================
-        config_data = await load_configuration_async()
-        srv_data = config_data.get("servers_info", {}).get(serveur, {})
-
-        has_storm = srv_data.get("storm", False)
-        has_fortress = srv_data.get("fortress", False)
-        has_adv_castle = srv_data.get("advanced_castle", False)
-
-        e_yes = DICT_EMOJIS.get("e_greencirclebullet", "🟢")
-        e_no = DICT_EMOJIS.get("e_tomatobulletpoint", "🔴")
-        e_storm = DICT_EMOJIS.get("e_aquamarine_brut", "💎")
-        e_fort = DICT_EMOJIS.get("e_fortresses", "🏰")
-        e_castle = DICT_EMOJIS.get("e_castles", "🏯")
-
-        modules_val = t(
-            langue,
-            "statut_modules_desc",
-            storm_status=e_yes if has_storm else e_no,
-            fort_status=e_yes if has_fortress else e_no,
-            castle_status=e_yes if has_adv_castle else e_no,
-            e_storm=e_storm,
-            e_fort=e_fort,
-            e_castle=e_castle,
-            defaut=(
-                f"{e_storm} **Storm Islands** : {e_yes if has_storm else e_no}\n"
-                f"{e_fort} **Fortress** : {e_yes if has_fortress else e_no}\n"
-                f"{e_castle} **Advanced Castle** : {e_yes if has_adv_castle else e_no}"
-            ),
-        )
-
-        embed.add_field(
-            name=t(langue, "statut_modules_title", serveur=serveur, defaut=f"✨ Modules Actifs sur {serveur}"),
-            value=modules_val,
-            inline=False,
-        )
 
         await setup_embed_footer(embed, interaction, langue)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="discover", description="Discover useful tools and community projects for GGE")
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.user.id)
     async def discover(self, interaction: discord.Interaction):
         langue, _ = await get_server_config(interaction)
 
@@ -1297,13 +535,7 @@ class AideCog(commands.Cog):
             view.message = await interaction.original_response()
 
     @app_commands.command(name="support", description="Get the invite link to the official support server")
-    @app_commands.checks.cooldown(1, 1.0, key=lambda i: i.user.id)
     async def support(self, interaction: discord.Interaction):
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except Exception as e:
-            logger.warning(f"❌ [Aide] Defer failed sur /{interaction.command.name} : {e}")
-            return
         langue, _ = await get_server_config(interaction)
 
         embed = discord.Embed(
@@ -1323,10 +555,9 @@ class AideCog(commands.Cog):
         )
         view.add_item(btn)
 
-        await interaction.followup.send(embed=embed, view=view)
+        await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="vote", description="Support the bot by voting on Top.gg")
-    @app_commands.checks.cooldown(1, 1.0, key=lambda i: i.user.id)
     async def vote(self, interaction: discord.Interaction):
         langue, _ = await get_server_config(interaction)
 
@@ -1349,7 +580,6 @@ class AideCog(commands.Cog):
         await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="news", description="Read the latest bot updates and patch notes")
-    @app_commands.checks.cooldown(1, 2.0, key=lambda i: i.user.id)
     async def news(self, interaction: discord.Interaction):
         langue, _ = await get_server_config(interaction)
 
@@ -1371,25 +601,132 @@ class AideCog(commands.Cog):
 
         await interaction.response.send_message(embed=embed, view=view)
 
-    def _i18n_dummy_keys(langue):
-        """
-        Fonction fantôme qui n'est jamais exécutée.
-        Elle sert uniquement de 'leurre' pour que l'expression régulière
-        de la commande !i18n_sync détecte ces clés et ne les supprime pas des JSON.
-        """
-        # --- Textes généraux et menus ---
-        t(langue, "help_home_title")
-        t(langue, "help_legend_v3")
-        t(langue, "aide_p0_desc")
-        t(langue, "help_placeholder")
+    @app_commands.command(name="contact", description="Send a problem, bug, or suggestion directly to the developer")
+    @app_commands.describe(message="Write your problem or suggestion in detail here")
+    async def contact_commande(self, interaction: discord.Interaction, message: str):
+        try:
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        except:
+            return
 
+        langue, _ = await get_server_config(interaction)
+
+        logger.info(f"📩 [Contact] Nouveau message de {interaction.user.name} ({interaction.user.id})")
+        maintenant_iso = discord.utils.utcnow().isoformat().replace("+00:00", "Z")
+
+        async with get_file_lock(CONTACTS_FILE):
+            try:
+                tickets_existants = []
+                if os.path.exists(CONTACTS_FILE):
+                    with open(CONTACTS_FILE, encoding="utf-8") as f:
+                        try:
+                            tickets_existants = json.load(f)
+                        except json.JSONDecodeError:
+                            tickets_existants = []
+
+                nouveau_ticket = {
+                    "date": maintenant_iso,
+                    "user_id": str(interaction.user.id),
+                    "user_name": interaction.user.name,
+                    "serveur": interaction.guild.name if interaction.guild else "Message Privé",
+                    "message": message,
+                }
+                tickets_existants.append(nouveau_ticket)
+
+                with open(CONTACTS_FILE, "w", encoding="utf-8") as f:
+                    json.dump(tickets_existants, f, indent=4, ensure_ascii=False)
+
+            except Exception as e:
+                logger.error(f"❌ [Contact] Erreur écriture JSON : {e}")
+                err_msg = t(
+                    langue,
+                    "contact_err_write",
+                    defaut="❌ Une erreur technique interne a empêché l'enregistrement de ton message.",
+                )
+                return await interaction.followup.send(err_msg)
+
+        try:
+            developpeur = self.bot.get_user(MON_ID_DISCORD)
+            if not developpeur:
+                developpeur = await self.bot.fetch_user(MON_ID_DISCORD)
+
+            embed_mp = discord.Embed(
+                title="📩 Nouveau Ticket Reçu !", color=self.clr_contact, timestamp=discord.utils.utcnow()
+            )
+            embed_mp.add_field(
+                name="{e_players} Expéditeur",
+                value=f"**{interaction.user.name}** (`{interaction.user.id}`)",
+                inline=True,
+            )
+            embed_mp.add_field(name="{e_castles} Provenance", value=f"*{nouveau_ticket['serveur']}*", inline=True)
+            embed_mp.add_field(name="{e_memberlist} Message", value=f"```text\n{message}\n```", inline=False)
+
+            embed_mp.fields[0].name = embed_mp.fields[0].name.replace("{e_players}", DICT_EMOJIS.get("e_players", "👤"))
+            embed_mp.fields[1].name = embed_mp.fields[1].name.replace("{e_castles}", DICT_EMOJIS.get("e_castles", "🏰"))
+            embed_mp.fields[2].name = embed_mp.fields[2].name.replace(
+                "{e_memberlist}", DICT_EMOJIS.get("e_memberlist", "📋")
+            )
+
+            await setup_embed_footer(embed_mp, interaction, "fr")
+
+            await developpeur.send(embed=embed_mp)
+
+        except discord.Forbidden:
+            logger.warning(f"⚠️ [Contact] Impossible d'envoyer le MP à {MON_ID_DISCORD} (DMs fermés).")
+        except Exception as e:
+            logger.error(f"❌ [Contact] Erreur lors de l'alerte MP : {e}")
+
+        succ_msg = t(
+            langue,
+            "contact_success",
+            defaut="{e_players} **Merci !** Ton message a bien été enregistré et transmis au développeur.",
+        )
+        await interaction.followup.send(succ_msg)
+
+    def _dummy_i18n():
+        langue = "fr"
+
+        t(langue, "help_home_title")
+        t(langue, "help_legend")
+        t(langue, "aide_p0_desc")
         t(langue, "help_cat_config")
         t(langue, "help_cat_communaute")
         t(langue, "help_cat_profils")
         t(langue, "help_cat_guerre")
         t(langue, "help_cat_events")
         t(langue, "help_cat_radars")
-
+        t(langue, "help_cmd_setup")
+        t(langue, "help_cmd_link_account")
+        t(langue, "help_cmd_status")
+        t(langue, "help_cmd_help")
+        t(langue, "help_cmd_news")
+        t(langue, "help_cmd_support")
+        t(langue, "help_cmd_contact")
+        t(langue, "help_cmd_vote")
+        t(langue, "help_cmd_discover")
+        t(langue, "help_cmd_server")
+        t(langue, "help_cmd_player_profile")
+        t(langue, "help_cmd_player_history")
+        t(langue, "help_cmd_player_dove")
+        t(langue, "help_cmd_player_compare")
+        t(langue, "help_cmd_alliance_profile")
+        t(langue, "help_cmd_alliance_might")
+        t(langue, "help_cmd_alliance_property")
+        t(langue, "help_cmd_alliance_desc")
+        t(langue, "help_cmd_alliance_scanner")
+        t(langue, "help_cmd_target_group")
+        t(langue, "help_cmd_event_player")
+        t(langue, "help_cmd_event_alliance")
+        t(langue, "help_cmd_calendar_group")
+        t(langue, "help_cmd_rank_group")
+        t(langue, "help_cmd_leaderboard_group")
+        t(langue, "help_cmd_woa_group")
+        t(langue, "help_cmd_radar_group")
+        t(langue, "help_cmd_radar_alliance_group")
+        t(langue, "help_cmd_rival_group")
+        t(langue, "help_cmd_fortress_group")
+        t(langue, "help_cmd_storm_group")
+        t(langue, "help_placeholder")
         t(langue, "help_menu_home")
         t(langue, "help_menu_home_desc")
         t(langue, "help_menu_config")
@@ -1398,8 +735,6 @@ class AideCog(commands.Cog):
         t(langue, "help_menu_guerre")
         t(langue, "help_menu_events")
         t(langue, "help_menu_radars")
-
-        # --- Éléments de la page Discover ---
         t(langue, "cmd_discover_title")
         t(langue, "cmd_discover_desc")
         t(langue, "cmd_disc_gge_tracker_title")
@@ -1411,100 +746,6 @@ class AideCog(commands.Cog):
         t(langue, "btn_website")
         t(langue, "btn_discord")
         t(langue, "btn_api")
-
-        # --- Commandes : Config ---
-        t(langue, "help_cmd_setup")
-        t(langue, "help_cmd_link_account")
-        t(langue, "help_cmd_status")
-        t(langue, "help_cmd_help")
-        t(langue, "config_featured")
-        t(langue, "config_supported")
-
-        # --- Commandes : Communauté ---
-        t(langue, "help_cmd_hub_setup")
-        t(langue, "help_cmd_hub_stop")
-        t(langue, "help_cmd_news")
-        t(langue, "help_cmd_support")
-        t(langue, "help_cmd_vote")
-        t(langue, "help_cmd_discover")
-
-        # --- Commandes : Profils ---
-        t(langue, "help_cmd_server")
-        t(langue, "help_cmd_player_profile")
-        t(langue, "help_cmd_player_history")
-        t(langue, "help_cmd_player_dove")
-        t(langue, "help_cmd_player_compare")
-        t(langue, "help_cmd_alliance_profile")
-        t(langue, "help_cmd_alliance_might")
-        t(langue, "help_cmd_alliance_property")
-        t(langue, "help_cmd_alliance_desc")
-
-        # --- Commandes : Guerre ---
-        t(langue, "help_cmd_alliance_scanner")
-        t(langue, "help_cmd_target_search")
-        t(langue, "help_cmd_target_setup")
-
-        # --- Commandes : Événements ---
-        t(langue, "help_cmd_event_player")
-        t(langue, "help_cmd_event_alliance")
-        t(langue, "help_cmd_calendar_track")
-        t(langue, "help_cmd_calendar_untrack")
-        t(langue, "help_cmd_calendar_current")
-        t(langue, "help_cmd_calendar_setup")
-        t(langue, "help_cmd_calendar_stop")
-        t(langue, "help_cmd_rank_event")
-        t(langue, "help_cmd_rank_league")
-        t(langue, "help_cmd_rank_contests")
-        t(langue, "help_cmd_rank_statistics")
-        t(langue, "help_cmd_rank_gacha")
-        t(langue, "help_cmd_rank_realms")
-        t(langue, "help_cmd_rank_alliance")
-        t(langue, "help_cmd_leaderboard_woa")
-        t(langue, "help_cmd_leaderboard_storm")
-        t(langue, "help_cmd_gt_alliance")
-        t(langue, "help_cmd_gt_rank")
-        t(langue, "help_cmd_rift_alliance")
-        t(langue, "help_cmd_rift_rank")
-        t(langue, "help_cmd_woa_history")
-        t(langue, "help_cmd_woa_summary")
-
-        # --- Commandes : Radars ---
-        t(langue, "help_cmd_radar_private_add_player")
-        t(langue, "help_cmd_radar_private_add_alliance")
-        t(langue, "help_cmd_radar_private_remove_player")
-        t(langue, "help_cmd_radar_private_remove_alliance")
-        t(langue, "help_cmd_radar_private_list")
-        t(langue, "help_cmd_radar_server_setup")
-        t(langue, "help_cmd_radar_server_add_player")
-        t(langue, "help_cmd_radar_server_add_alliance")
-        t(langue, "help_cmd_radar_server_remove_player")
-        t(langue, "help_cmd_radar_server_remove_alliance")
-        t(langue, "help_cmd_radar_server_list")
-        t(langue, "help_cmd_rival_start")
-        t(langue, "help_cmd_rival_stop")
-        t(langue, "help_cmd_rival_add")
-        t(langue, "help_cmd_rival_list")
-        t(langue, "help_cmd_fortress_scan")
-        t(langue, "help_cmd_fortress_stop")
-        t(langue, "help_cmd_storm_forts")
-        t(langue, "help_cmd_storm_isles")
-        t(langue, "help_cmd_storm_occupier")
-        t(langue, "help_cmd_storm_status")
-        t(langue, "help_cmd_storm_setup_isles")
-        t(langue, "help_cmd_storm_stop_isles")
-        t(langue, "help_cmd_storm_setup_forts")
-        t(langue, "help_cmd_storm_stop_forts")
-
-        # --- Commandes : Classement ---
-        t(langue, "ev_bracket_1")
-        t(langue, "ev_bracket_2")
-        t(langue, "ev_bracket_3")
-        t(langue, "ev_bracket_4")
-        t(langue, "ev_bracket_5")
-        t(langue, "season_bracket_1")
-        t(langue, "season_bracket_2")
-        t(langue, "season_bracket_3")
-        t(langue, "season_bracket_4")
 
 
 async def setup(bot: commands.Bot):
