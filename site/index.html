@@ -130,7 +130,7 @@
       <section class="view" id="view-ptaki">
         <div class="welcome"><div><div class="eyebrow">OCHRONA GRACZY — DOVE</div><h1>🐦 Ptaki (Dove)</h1><p>Aktywna ochrona graczy ze wszystkich sojuszy serwera E4K PL1 BETA wraz z dokładnym terminem jej zakończenia.</p></div></div>
         <div class="panel"><div class="panel-title"><h2>Aktywne ochrony na całym serwerze</h2><span class="sub">Wszystkie sojusze</span></div>
-          <div class="searchrow"><input class="field" id="birdsSearch" placeholder="Szukaj gracza lub sojuszu"><select class="field" id="birdsSort"><option value="asc">Najbliższy koniec ochrony</option><option value="desc">Najpóźniejszy koniec ochrony</option></select><button class="btn primary" id="birdsRefresh" type="button">Odśwież dane</button></div>
+          <div class="searchrow"><select class="field" id="birdsAlliance"><option value="">Wszystkie sojusze</option></select><input class="field" id="birdsPlayer" placeholder="Nazwa gracza (opcjonalnie)"><select class="field" id="birdsSort"><option value="asc">Najbliższy koniec ochrony</option><option value="desc">Najpóźniejszy koniec ochrony</option></select><button class="btn primary" id="birdsRefresh" type="button">Sprawdź ochronę</button></div>
           <div class="result" id="birdsResult"><div class="notice">Pobieranie aktywnych ochron Dove ze wszystkich sojuszy serwera.</div></div>
         </div>
       </section>
@@ -400,27 +400,36 @@ attachSuggestions("targetAllianceFilter","alliances");
 
 let birdsRows=[];
 function renderBirds(){
-  const needle=($("birdsSearch").value||"").trim().toLocaleLowerCase("pl-PL");
   const direction=$("birdsSort").value==="desc"?-1:1;
-  const rows=birdsRows.filter(x=>(String(x.player||"")+" "+String(x.alliance||"")).toLocaleLowerCase("pl-PL").includes(needle))
-    .sort((a,b)=>direction*(Date.parse(a.peace_disabled_at)-Date.parse(b.peace_disabled_at)));
+  const rows=[...birdsRows].sort((a,b)=>direction*(Date.parse(a.peace_disabled_at)-Date.parse(b.peace_disabled_at)));
   if(!rows.length){$("birdsResult").innerHTML='<div class="notice">Brak aktywnych ochron Dove'+(needle?' pasujących do wyszukiwania.':'.')+'</div>';return;}
   const fmt=v=>new Date(v).toLocaleString("pl-PL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false});
   const now=Date.now();
   const body=rows.map(x=>{const end=Date.parse(x.peace_disabled_at);const seconds=Math.max(0,Math.floor((end-now)/1000));const d=Math.floor(seconds/86400),h=Math.floor(seconds%86400/3600),m=Math.floor(seconds%3600/60),sec=seconds%60;return '<tr><td><b>'+esc(x.player)+'</b></td><td>'+esc(x.alliance)+'</td><td>'+esc(x.might??"—")+'</td><td><b>'+esc(fmt(x.peace_disabled_at))+'</b><small style="display:block;opacity:.75">Pozostało: '+d+' d '+h+' h '+m+' min '+sec+' s</small></td></tr>'}).join("");
   $("birdsResult").innerHTML='<div class="notice">Aktywne ochrony: <b>'+rows.length+'</b> • Wszystkie sojusze • Skanowano graczy: '+esc(window.birdsScanned||"—")+'</div><div class="table-wrap"><table><thead><tr><th>Gracz</th><th>Sojusz</th><th>Moc</th><th>Koniec ochrony (data i godzina)</th></tr></thead><tbody>'+body+'</tbody></table></div>';
 }
+async function loadBirdAlliances(){
+  const select=$("birdsAlliance");
+  try{
+    const data=await api("/api/bot/doves/alliances?server="+encodeURIComponent($("server").value));
+    const selected=select.value;
+    select.innerHTML='<option value="">Wszystkie sojusze</option>'+(data.items||[]).map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join("");
+    if([...select.options].some(o=>o.value===selected))select.value=selected;
+    if(!data.ready){$("birdsResult").innerHTML='<div class="notice">Trwa pobieranie listy sojuszy. Użyj „Odśwież dane” za chwilę.</div>';}
+  }catch(err){$("birdsResult").innerHTML='<div class="notice warn">Nie udało się pobrać listy sojuszy: '+esc(err.message)+'</div>';}
+}
 async function loadBirds(){
   const btn=$("birdsRefresh"),label=btn.textContent;btn.disabled=true;btn.textContent="Pobieranie…";
-  $("birdsResult").innerHTML='<div class="notice">Pobieram listę graczy i terminy ochron Dove ze wszystkich sojuszy serwera. Przy dużym skanie może to potrwać.</div>';
-  try{const data=await api("/api/bot/doves?server="+encodeURIComponent($("server").value));birdsRows=data.items||[];window.birdsScanned=data.scanned_players||0;renderBirds();}
-  catch(err){$("birdsResult").innerHTML='<div class="notice warn">'+esc(err.message)+'</div>';}
+  $("birdsResult").innerHTML='<div class="notice">Pobieram ochrony Dove. Możesz wybrać cały serwer, sojusz albo konkretnego gracza.</div>';
+  try{
+    const params=new URLSearchParams({server:$("server").value,alliance:$("birdsAlliance").value,player:$("birdsPlayer").value.trim()});
+    const data=await api("/api/bot/doves?"+params.toString());birdsRows=data.items||[];window.birdsScanned=data.scanned_players||0;renderBirds();
+  }catch(err){$("birdsResult").innerHTML='<div class="notice warn">'+esc(err.message)+'</div>';}
   finally{btn.disabled=false;btn.textContent=label;}
 }
 $("birdsRefresh").onclick=loadBirds;
-$("birdsSearch").addEventListener("input",renderBirds);
 $("birdsSort").addEventListener("change",renderBirds);
-document.querySelector('[data-view="ptaki"]')?.addEventListener("click",()=>{if(!birdsRows.length)loadBirds()});
+document.querySelector('[data-view="ptaki"]')?.addEventListener("click",()=>{if(!$("birdsAlliance").options.length||$("birdsAlliance").options.length===1)loadBirdAlliances();if(!birdsRows.length)loadBirds()});
 
 </script>
 <datalist id="suggest-playerName"></datalist>
