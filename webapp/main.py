@@ -747,7 +747,7 @@ async def bot_storm_isles(
         page_rows, _ = unpack_isles(page_payload)
         added = add_isles(page_rows)
         pages_fetched += 1
-        if not page_rows or added == 0:
+        if not page_rows or (total_pages is None and added == 0):
             break
         current_page += 1
         await asyncio.sleep(0.25)
@@ -763,10 +763,26 @@ async def bot_storm_isles(
         payload["pagination"].update({"pages_fetched": pages_fetched, "isles_merged": len(merged)})
     else:
         payload = {"isles": all_isles, "pagination": {"pages_fetched": pages_fetched, "isles_merged": len(merged)}}
+    resource_counts = {str(isle_id): sum(1 for item in merged.values() if item.get("isle_id") == isle_id)
+                       for isle_id in range(1, 7)}
+    state_counts = {str(state_id): sum(1 for item in merged.values() if item.get("state") == state_id)
+                    for state_id in range(0, 3)}
+    filtered_resource_counts = {str(isle_id): sum(1 for item in all_isles if item.get("isle_id") == isle_id)
+                                for isle_id in range(1, 7)}
     logging.info("Storm isles scan %s: pages=%s total=%s filtered=%s state=%s resource=%s",
                  server.upper(), pages_fetched, len(merged), len(all_isles), state, resource)
     return {"data": payload, "server": server.upper(),
             "filters": {"state": state, "resource": resource, "occupier": occupier.strip()},
+            "summary": {
+                "total_isles": len(merged),
+                "returned_isles": len(all_isles),
+                "resource_counts": resource_counts,
+                "filtered_resource_counts": filtered_resource_counts,
+                "state_counts": state_counts,
+                "resource_types": {"1":"wood_small","2":"stone_small","3":"aquamarine_large",
+                                   "4":"wood_large","5":"stone_large","6":"aquamarine_small"},
+                "state_types": {"0":"free","1":"occupied","2":"respawning"}
+            },
             "coverage": {"pages_fetched": pages_fetched, "isles_before_resource_filter": len(merged),
                          "isles_returned": len(all_isles), "pagination_reported": total_pages_value is not None}}
 
