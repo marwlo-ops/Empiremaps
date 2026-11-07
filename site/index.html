@@ -35,6 +35,8 @@
       <button data-view="fortress"><span class="sym">⌖</span>Historia fortec</button>
       <button data-view="server"><span class="sym">▦</span>Statystyki serwera</button>
       <button data-view="map"><span class="sym">◈</span>Mapa i radar</button>
+      <button data-view="ptaki"><span class="sym">🐦</span>Ptaki</button>
+      <button data-view="mapa"><span class="sym">🗺</span>Mapa sojuszy</button>
       <button data-view="events"><span class="sym">◷</span>Wydarzenia</button>
     </nav></div>
     <div class="side-bottom">EMPIREMAPS WEB 0.1<br>Discord nie jest wymagany do logowania ani korzystania z panelu.<br><br>Nieoficjalny projekt społeczności.</div>
@@ -125,6 +127,17 @@
           <div class="result" id="botCastleResult"></div>
         </div>
         <div class="notice warn" style="margin-top:16px">Status: radar pobiera dane z API po ręcznym odświeżeniu. Automatyczne monitorowanie w tle i powiadomienia nie są jeszcze aktywne.</div></section>
+      <section class="view" id="view-ptaki">
+        <div class="welcome"><div><div class="eyebrow">MONITORING SOJUSZU</div><h1>🐦 Ptaki</h1><p>Lista zdarzeń dotyczących graczy sojuszu, uporządkowana od najnowszych.</p></div></div>
+        <div class="panel"><div class="panel-title"><h2>Filtry ptaków</h2><span class="sub">E4K PL1 BETA</span></div>
+          <div class="searchrow"><select class="field" id="birdsAlliance"><option value="115">RB — ReBorN</option><option value="41343">MD — MADDEVILS</option><option value="all">Wszystkie sojusze</option></select><select class="field" id="birdsSort"><option value="desc">Od najnowszych</option><option value="asc">Od najstarszych</option></select><button class="btn primary" id="birdsRefresh" type="button">Odśwież</button></div>
+          <div class="result" id="birdsResult"><div class="notice">Panel przygotowany. Po potwierdzeniu, co dokładnie oznacza „ptak” w Twoim sposobie monitorowania, podłączę właściwe zdarzenia i daty z API. Nie pokazuję fikcyjnych wpisów.</div></div>
+        </div>
+      </section>
+      <section class="view" id="view-mapa">
+        <div class="welcome"><div><div class="eyebrow">MAPA TAKTYCZNA</div><h1>Mapa sojuszy</h1><p>Mapa przeniesiona z Empirenew — RB i MD, pozycje zamków i posterunków oraz historia zmian.</p></div></div>
+        <div class="panel" style="padding:0;overflow:hidden"><iframe title="Mapa sojuszy RB i MD" src="/mapa-sojuszy.html" loading="lazy" style="display:block;width:100%;height:calc(100vh - 220px);min-height:650px;border:0;background:#0b1220"></iframe></div>
+      </section>
       <section class="view" id="view-events"><div class="welcome"><div><div class="eyebrow">KALENDARZ</div><h1>Wydarzenia</h1><p>Terminy wydarzeń pobierane z Community Hub.</p></div><button class="btn primary" id="calendarRefresh">Odśwież kalendarz</button></div>
         <div class="searchrow" style="margin-bottom:16px"><button class="btn primary" data-calendar-view="main">Pełny kalendarz</button><button class="btn" data-calendar-view="future">Najbliższe 7 dni</button><button class="btn" data-calendar-view="alliance">Wydarzenia sojusznicze</button></div>
         <div class="panel"><div class="panel-title"><h2 id="calendarTitle">Pełny kalendarz</h2><span class="sub" id="calendarUpdated">Oczekiwanie na dane…</span></div><div class="result" id="calendarResult"><div class="notice">Wczytywanie kalendarza…</div></div></div>
@@ -143,7 +156,7 @@ async function health(){try{await api("/api/health");$("apiDot").classList.remov
 $("authForm").onsubmit=async e=>{e.preventDefault();$("authSubmit").disabled=true;$("authError").textContent="";try{const data=await api(registerMode?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value,password:$("password").value})});token=data.token;localStorage.setItem("empiremaps_token",token);showApp(data.user)}catch(err){$("authError").textContent=err.message}finally{$("authSubmit").disabled=false}};
 $("logout").onclick=()=>{token="";localStorage.removeItem("empiremaps_token");$("appShell").classList.add("hidden");$("authScreen").classList.remove("hidden");$("password").value=""};
 async function boot(){if(!token)return;try{const user=await api("/api/auth/me");showApp(user)}catch{token="";localStorage.removeItem("empiremaps_token")}}boot();
-const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar",events:"Wydarzenia"};
+const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar",ptaki:"Ptaki",mapa:"Mapa sojuszy",events:"Wydarzenia"};
 function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus();if(view==="events")loadCalendar("main")}
 $("nav").onclick=e=>{const b=e.target.closest("button[data-view]");if(b)go(b.dataset.view)};
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
