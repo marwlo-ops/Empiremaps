@@ -439,22 +439,37 @@ async def bot_radar_movements(
 ):
     if page < 1 or page > 100 or castle_type < 0 or movement_type < 0:
         raise HTTPException(400, "Nieprawidłowe filtry radaru.")
-    url = "https://api-beta.gge-tracker.com/api/v1/server/movements"
     params = {"page": page, "castleType": castle_type, "movementType": movement_type}
-    try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            response = await client.get(url, headers=bot_headers(server), params=params)
-        if response.status_code == 404:
-            raise HTTPException(404, "Brak ruchów dla wybranego serwera.")
-        if response.status_code == 429:
-            raise HTTPException(429, "API radaru ograniczyło liczbę zapytań. Spróbuj później.")
-        if response.status_code >= 400:
-            raise HTTPException(502, f"API radaru zwróciło błąd {response.status_code}.")
-        return {"data": response.json(), "server": server.upper()}
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(502, "Nie udało się połączyć z API radaru.")
+    # The original bot used the beta hostname. The public GGE Tracker API now
+    # documents /server/movements on the primary API host; try it first and
+    # keep the legacy host as a compatibility fallback.
+    last_status = None
+    for base_url in (BOT_API_BASE, "https://api-beta.gge-tracker.com/api/v1"):
+        try:
+            async with httpx.AsyncClient(timeout=18, follow_redirects=True) as client:
+                response = await client.get(
+                    base_url + "/server/movements",
+                    headers=bot_headers(server),
+                    params=params,
+                )
+            if response.status_code == 200:
+                try:
+                    payload = response.json()
+                except Exception:
+                    raise HTTPException(502, "API radaru zwróciło nieprawidłowy format danych.")
+                return {"data": payload, "server": server.upper(), "source": base_url}
+            if response.status_code == 429:
+                raise HTTPException(429, "API radaru ograniczyło liczbę zapytań. Spróbuj później.")
+            last_status = response.status_code
+        except HTTPException:
+            raise
+        except Exception:
+            last_status = "connection_error"
+            continue
+    if last_status == "connection_error":
+        raise HTTPException(502, "Nie udało się połączyć z żadnym hostem API radaru.")
+    raise HTTPException(502, f"API radaru nie udostępniło danych (ostatni kod: {last_status}).")
+
 
 @app.get("/api/features")
 def features(user: User = Depends(current_user)):
