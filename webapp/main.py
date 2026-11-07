@@ -1,4 +1,5 @@
 import os
+import asyncio
 import re
 import hmac
 import hashlib
@@ -240,6 +241,90 @@ async def bot_tracker_get(path: str, server: str, params: dict | None = None):
 
 
 BOT_SUGGEST_CACHE: dict[str, dict] = {}
+BOT_SCAN_STATUS: dict[str, dict] = {}
+BOT_SCAN_TASKS: dict[str, asyncio.Task] = {}
+
+async def _scan_server_for_suggestions(server: str):
+    """Pobiera indeks nazw graczy/sojuszy z paginowanego API; bez zależności od Discorda."""
+    key = server.upper()
+    status = BOT_SCAN_STATUS.setdefault(key, {})
+    status.update({"running": True, "started_at": datetime.now(timezone.utc).isoformat(), "error": None})
+    try:
+        first = await bot_tracker_get("players", key, {
+            "limit": 100, "page": 1, "banFilter": 0, "allianceFilter": -1,
+            "protectionFilter": -1, "inactiveFilter": 1, "kingdomFilter": 999,
+            "orderBy": "might_current", "orderType": "DESC",
+        })
+        def unpack(payload):
+            if isinstance(payload, list):
+                return payload, {}
+            if not isinstance(payload, dict):
+                return [], {}
+            items = payload.get("players", payload.get("items", payload.get("data", [])))
+            if isinstance(items, dict):
+                items = items.get("players", items.get("items", []))
+            meta = payload.get("pagination", payload)
+            return (items if isinstance(items, list) else []), (meta if isinstance(meta, dict) else {})
+        rows, meta = unpack(first)
+        if not rows:
+            raise RuntimeError("API nie zwróciło listy graczy.")
+        total_pages = int(meta.get("total_pages", meta.get("totalPages", meta.get("last_page", 1))) or 1)
+        total_pages = max(1, min(total_pages, 200))
+        players = {}
+        def add_rows(items):
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                name = item.get("player_name") or item.get("name")
+                if not name:
+                    continue
+                alliance = item.get("alliance_name") or item.get("alliance") or ""
+                if isinstance(alliance, dict):
+                    alliance = alliance.get("name", "")
+                if isinstance(alliance, str) and alliance.startswith("[") and alliance.endswith("]"):
+                    alliance = alliance[1:-1]
+                players[str(name).strip()] = str(alliance).strip()
+        add_rows(rows)
+        for page in range(2, total_pages + 1):
+            payload = await bot_tracker_get("players", key, {
+                "limit": 100, "page": page, "banFilter": 0, "allianceFilter": -1,
+                "protectionFilter": -1, "inactiveFilter": 1, "kingdomFilter": 999,
+                "orderBy": "might_current", "orderType": "DESC",
+            })
+            page_rows, _ = unpack(payload)
+            add_rows(page_rows)
+            if page < total_pages:
+                await asyncio.sleep(1.2)
+        alliances = sorted({v for v in players.values() if v and v.casefold() != "sans alliance"}, key=str.casefold)
+        BOT_SUGGEST_CACHE[key] = {
+            "loaded": time.time(), "players": sorted(players.keys(), key=str.casefold),
+            "alliances": alliances, "scan_available": bool(players),
+            "player_count": len(players), "page_count": total_pages,
+        }
+        status.update({"running": False, "finished_at": datetime.now(timezone.utc).isoformat(),
+                       "players": len(players), "alliances": len(alliances), "pages": total_pages, "error": None})
+    except Exception as exc:
+        status.update({"running": False, "finished_at": datetime.now(timezone.utc).isoformat(),
+                       "error": str(exc)[:300]})
+    finally:
+        BOT_SCAN_TASKS.pop(key, None)
+
+@app.get("/api/bot/scan/status")
+def bot_scan_status(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
+    key = server.upper()
+    cached = BOT_SUGGEST_CACHE.get(key, {})
+    return {"server": key, "scan": BOT_SCAN_STATUS.get(key, {"running": False}),
+            "cached": bool(cached.get("scan_available")), "cached_at": cached.get("loaded"),
+            "players": cached.get("player_count", 0), "alliances": len(cached.get("alliances", []))}
+
+@app.post("/api/bot/scan/{server}")
+async def bot_scan_start(server: str, user: User = Depends(current_user)):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
+        raise HTTPException(400, "Nieprawidłowy serwer.")
+    key = server.upper()
+    if key not in BOT_SCAN_TASKS:
+        BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
+    return {"server": key, "running": True, "message": "Skan graczy i sojuszy został uruchomiony w tle."}
 
 @app.get("/api/bot/suggestions")
 async def bot_suggestions(
@@ -256,35 +341,12 @@ async def bot_suggestions(
         raise HTTPException(400, "Nieprawidłowy serwer.")
     key = server.upper()
     cache = BOT_SUGGEST_CACHE.get(key)
-    now = time.time()
-    if not cache or now - cache["loaded"] > 300:
-        players_data = {}
-        scan_root = ROOT / "data" / "server_scans" / key
-        try:
-            scan_files = list(scan_root.rglob("server_*.json"))
-            if scan_files:
-                latest = max(scan_files, key=lambda p: p.stat().st_mtime)
-                with latest.open(encoding="utf-8") as file:
-                    raw = json.load(file)
-                players_data = raw.get("players", {}) if isinstance(raw, dict) else {}
-        except (OSError, ValueError, TypeError):
-            players_data = {}
-        alliances = set()
-        for name, info in players_data.items():
-            if not isinstance(info, dict):
-                continue
-            alliance_name = info.get("alliance") or info.get("alliance_name")
-            if isinstance(alliance_name, dict):
-                alliance_name = alliance_name.get("name")
-            if alliance_name and str(alliance_name).strip() and str(alliance_name).lower() != "sans alliance":
-                alliances.add(str(alliance_name).strip())
-        cache = {
-            "loaded": now,
-            "players": [str(name) for name in players_data.keys() if str(name).strip()],
-            "alliances": sorted(alliances, key=str.casefold),
-            "scan_available": bool(players_data),
-        }
-        BOT_SUGGEST_CACHE[key] = cache
+    if not cache or time.time() - cache["loaded"] > 21600:
+        if key not in BOT_SCAN_TASKS:
+            BOT_SCAN_TASKS[key] = asyncio.create_task(_scan_server_for_suggestions(key))
+        return {"items": [], "kind": kind, "server": key, "source": "live_player_scan",
+                "scan_available": False, "scan_running": True,
+                "message": "Trwa pobieranie listy graczy i sojuszy z serwera. Podpowiedzi pojawią się po zakończeniu skanu."}
     needle = q.casefold().strip()
     values = cache[kind]
     if needle:
@@ -292,14 +354,9 @@ async def bot_suggestions(
         values.sort(key=lambda name: (not name.casefold().startswith(needle), name.casefold()))
     else:
         values = values[:25]
-    return {
-        "items": values[:25],
-        "kind": kind,
-        "server": key,
-        "source": "server_scan",
-        "scan_available": cache["scan_available"],
-        "message": None if cache["scan_available"] else "Brak skanu tego serwera. Podpowiedzi pojawią się po pobraniu danych serwera.",
-    }
+    return {"items": values[:25], "kind": kind, "server": key, "source": "live_player_scan",
+            "scan_available": True, "scan_running": False, "message": None,
+            "cached_at": cache["loaded"]}
 
 @app.get("/api/bot/fortresses/meta")
 async def bot_fortress_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
