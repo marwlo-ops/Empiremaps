@@ -152,7 +152,10 @@ const esc=v=>String(v??"—").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">"
 function setAuthMode(){ $("authTitle").textContent=registerMode?"NOWE KONTO":"DOSTĘP DO PANELU";$("authSubmit").textContent=registerMode?"Utwórz konto":"Zaloguj się";$("authSwitchText").textContent=registerMode?"Masz już konto?":"Nie masz konta?";$("authSwitch").textContent=registerMode?"Zaloguj się":"Utwórz konto";$("password").autocomplete=registerMode?"new-password":"current-password";$("authError").textContent=""}
 $("authSwitch").onclick=()=>{registerMode=!registerMode;setAuthMode()};
 async function api(path,opts={}){const res=await fetch(path,{...opts,headers:{"Content-Type":"application/json",...(token?{Authorization:"Bearer "+token}:{}),...(opts.headers||{})}});let data={};try{data=await res.json()}catch{}if(!res.ok)throw new Error(data.detail||"Wystąpił błąd połączenia.");return data}
-function showApp(user){$("authScreen").classList.add("hidden");$("appShell").classList.remove("hidden");$("userEmail").textContent=user.email||"";health()}
+const DEFAULT_SERVER="E4K_PL1_BETA";
+function applyDefaultServer(){const el=$("server");if(el)el.value=DEFAULT_SERVER}
+applyDefaultServer();
+function showApp(user){applyDefaultServer();$("authScreen").classList.add("hidden");$("appShell").classList.remove("hidden");$("userEmail").textContent=user.email||"";health()}
 async function health(){try{await api("/api/health");$("apiDot").classList.remove("off");$("apiStatus").textContent="Backend działa";}catch{$("apiDot").classList.add("off");$("apiStatus").textContent="Brak połączenia z backendem";}}
 $("authForm").onsubmit=async e=>{e.preventDefault();$("authSubmit").disabled=true;$("authError").textContent="";try{const data=await api(registerMode?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify({email:$("email").value,password:$("password").value})});token=data.token;localStorage.setItem("empiremaps_token",token);showApp(data.user)}catch(err){$("authError").textContent=err.message}finally{$("authSubmit").disabled=false}};
 $("logout").onclick=()=>{token="";localStorage.removeItem("empiremaps_token");$("appShell").classList.add("hidden");$("authScreen").classList.remove("hidden");$("password").value=""};
@@ -473,7 +476,7 @@ installButton.onclick=async()=>{
   const standalone=window.matchMedia("(display-mode: standalone)").matches||window.navigator.standalone;
   alert(standalone?"Empiremaps jest już zainstalowane.":"Aby zainstalować: otwórz menu Chrome ⋮ i wybierz „Zainstaluj aplikację” lub „Dodaj do ekranu głównego”. Jeśli tej opcji nie ma, odśwież stronę i spróbuj ponownie.");
 };
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=2",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("/sw.js?v=3",{updateViaCache:"none"}).then(reg=>reg.update()).catch(()=>{}));}
 </script>
 <datalist id="suggest-playerName"></datalist>
 <datalist id="suggest-allianceName"></datalist>
