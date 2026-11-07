@@ -801,7 +801,7 @@ async def bot_movement_review(
             continue
         filtered.append(row)
     return {"server": key, "movement_type": movement_type, "alliance": alliance or "all",
-            "player": player or "all", "count": len(filtered), "items": filtered,
+            "player": player or "all", "count": len(filtered), "movements": filtered,
             "source": source, "page": page,
             "note": "Dane czasu i liczebności zależą od pól faktycznie zwracanych przez API."}
 
