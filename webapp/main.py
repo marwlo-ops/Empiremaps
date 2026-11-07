@@ -32,6 +32,9 @@ if DATABASE_URL.startswith("sqlite"):
     # connections, including request sessions, not only during create_all().
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
+# A single session factory is required for both SQLite and PostgreSQL.
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
 if not DATABASE_URL.startswith("sqlite"):
     with engine.begin() as connection:
         connection.execute(text('CREATE SCHEMA IF NOT EXISTS empiremaps'))
