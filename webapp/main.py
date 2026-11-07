@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr, Field
@@ -66,6 +67,9 @@ class PushSubscription(Base):
 Base.metadata.create_all(engine)
 
 app = FastAPI(title="Empiremaps API", version="0.1.0", docs_url="/api/docs", redoc_url=None)
+# Read-only public tracker endpoints are consumed by the separate Empirenew static frontend.
+# No cookies or credentials are exposed through this CORS policy.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "OPTIONS"], allow_headers=["Accept", "Content-Type"])
 SECRET = os.getenv("JWT_SECRET_KEY", "")
 if not SECRET:
     SECRET = "local-development-only-change-before-deploy"
