@@ -638,8 +638,119 @@ async def bot_storm_forts(
     }
     if availability:
         params["filterByAvailability"] = availability
-    return {"data": await bot_tracker_get("storms/forts", server, params), "server": server.upper(),
-            "filters": {"availability": availability, "levels": selected or ["40","50","60","70","80"], "min_attacks": min_attacks}}
+
+    # Pobierz wszystkie strony wyników, tak jak robi to bot Discord.
+    first_payload = await bot_tracker_get("storms/forts", server, params)
+
+    def unpack_forts(value):
+        if isinstance(value, list):
+            return value, {}
+        if not isinstance(value, dict):
+            return [], {}
+        rows = value.get("forts", value.get("items", value.get("data", value.get("results", []))))
+        if isinstance(rows, dict):
+            rows = rows.get("forts", rows.get("items", rows.get("data", rows.get("results", []))))
+        meta = value.get("pagination", value)
+        return (rows if isinstance(rows, list) else []), (meta if isinstance(meta, dict) else {})
+
+    first_rows, meta = unpack_forts(first_payload)
+    candidates = [meta]
+    if isinstance(first_payload, dict):
+        for key in ("meta", "pagination", "page", "data"):
+            value = first_payload.get(key)
+            if isinstance(value, dict):
+                candidates.append(value)
+                for nested_key in ("meta", "pagination"):
+                    nested = value.get(nested_key)
+                    if isinstance(nested, dict):
+                        candidates.append(nested)
+
+    total_pages_value = None
+    total_count = None
+    for candidate in candidates:
+        for key in ("total_pages", "totalPages", "last_page", "lastPage", "last_page_number"):
+            if candidate.get(key) is not None:
+                total_pages_value = candidate.get(key)
+                break
+        if total_pages_value is None:
+            for key in ("total_items_count", "total", "totalItemsCount", "total_count", "totalCount"):
+                value = candidate.get(key)
+                if isinstance(value, (int, float)):
+                    total_count = int(value)
+                    break
+        if total_pages_value is not None:
+            break
+    if total_pages_value is None and total_count is not None:
+        total_pages_value = max(1, (total_count + size - 1) // size)
+    try:
+        total_pages = max(1, min(int(total_pages_value), 200)) if total_pages_value is not None else None
+    except (TypeError, ValueError):
+        total_pages = None
+
+    merged = {}
+    def add_forts(rows):
+        added = 0
+        for item in rows:
+            if not isinstance(item, dict):
+                continue
+            x, y = item.get("position_x"), item.get("position_y")
+            identity = ("xy", x, y) if x is not None and y is not None else (
+                "fallback", item.get("fort_uid") or item.get("id"),
+                item.get("isle_id"), item.get("available_at")
+            )
+            if identity not in merged:
+                added += 1
+            merged[identity] = item
+        return added
+
+    add_forts(first_rows)
+    pages_fetched = 1
+    current_page = page + 1
+    while pages_fetched < 200 and (total_pages is None or current_page <= total_pages):
+        page_params = dict(params)
+        page_params["page"] = current_page
+        page_payload = await bot_tracker_get("storms/forts", server, page_params)
+        page_rows, _ = unpack_forts(page_payload)
+        added = add_forts(page_rows)
+        pages_fetched += 1
+        if not page_rows or (total_pages is None and added == 0):
+            break
+        current_page += 1
+        await asyncio.sleep(0.25)
+
+    forts = list(merged.values())
+    if isinstance(first_payload, dict):
+        payload = dict(first_payload)
+        payload["forts"] = forts
+        pagination = dict(meta)
+        pagination.update({
+            "pages_fetched": pages_fetched,
+            "forts_merged": len(forts),
+            "total_pages_detected": total_pages,
+            "total_items_detected": total_count,
+        })
+        payload["pagination"] = pagination
+    else:
+        payload = {"forts": forts, "pagination": {
+            "pages_fetched": pages_fetched, "forts_merged": len(forts),
+            "total_pages_detected": total_pages, "total_items_detected": total_count,
+        }}
+
+    level_counts = {level: sum(1 for fort in forts if fort.get("isle_id") in ids)
+                    for level, ids in level_map.items()}
+    logging.info(
+        "Storm forts scan %s: pages=%s total=%s availability=%s min_attacks=%s levels=%s",
+        server.upper(), pages_fetched, len(forts), availability, min_attacks, selected or "all"
+    )
+    return {
+        "data": payload,
+        "server": server.upper(),
+        "filters": {"availability": availability, "levels": selected or ["40","50","60","70","80"],
+                    "min_attacks": min_attacks},
+        "summary": {"total_forts": len(forts), "pages_fetched": pages_fetched,
+                    "level_counts": level_counts, "availability": availability,
+                    "min_attacks": min_attacks},
+    }
 
 @app.get("/api/bot/storms/isles")
 async def bot_storm_isles(
