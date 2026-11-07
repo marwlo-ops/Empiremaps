@@ -195,6 +195,7 @@ function renderBotPayload(payload){
     if(key==="isles"){
       const names={1:"Drewno — mała",2:"Kamień — mała",3:"Akwamaryna — duża",4:"Drewno — duża",5:"Kamień — duża",6:"Akwamaryna — mała"};
       const stateNames={0:"Wolna",1:"Zajęta",2:"Odnawia się"};
+      const exactTime=v=>{if(!v)return "Brak danych";const t=Date.parse(v);if(!Number.isFinite(t))return String(v);return new Date(t).toLocaleString("pl-PL",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit",hour12:false})};
       const body=rows.map(x=>{
         const captured=x.captured_at||x.occupied_at||x.occupation_started_at||x.capturedAt||x.occupiedAt||null;
         const ends=x.occupation_ends_at||x.occupied_until||x.occupationEndsAt||x.occupation_end||x.end_at||null;
@@ -207,11 +208,11 @@ function renderBotPayload(payload){
         const calculatedAvailable=Number.isFinite(capturedMs)?new Date(capturedMs+(occupationHours+respawnHours)*3600000).toISOString():null;
         const effectiveEnd=ends||calculatedEnd;
         const effectiveAvailable=available||calculatedAvailable;
-        const startText=captured?fmtTime(captured):"API nie podaje";
-        const endText=effectiveEnd?fmtTime(effectiveEnd):"Brak danych";
+        const startText=captured?exactTime(captured):"API nie podaje";
+        const endText=effectiveEnd?exactTime(effectiveEnd):"Brak danych";
         const nextText=effectiveAvailable?countdown(effectiveAvailable):"Brak terminu — brak daty zdobycia";
         const respawnText=available?"Termin potwierdzony przez API":(calculatedAvailable?(smallIsle?"Okupacja 6 h + odnowienie 36 h = 42 h":"Okupacja 18 h + odnowienie 72 h = 90 h"):"Nie można obliczyć bez daty zdobycia");
-        return '<tr><td>'+esc(names[x.isle_id]||("Wyspa "+(x.isle_id??"?")))+'</td><td>'+esc((x.position_x??"?")+":"+(x.position_y??"?"))+'</td><td>'+esc(x.occupier_name||"—")+'</td><td>'+esc(x.occupier_alliance_name||"—")+'</td><td>'+esc(stateNames[x.state]||String(x.state??"—"))+'</td><td>'+esc(startText)+'</td><td>'+esc(endText)+'</td><td><b>'+esc(nextText)+'</b><small style="display:block;opacity:.75">'+esc(respawnText)+'</small></td></tr>';
+        return '<tr><td>'+esc(names[x.isle_id]||("Wyspa "+(x.isle_id??"?")))+'</td><td>'+esc((x.position_x??"?")+":"+(x.position_y??"?"))+'</td><td>'+esc(x.occupier_name||"—")+'</td><td>'+esc(x.occupier_alliance_name||"—")+'</td><td>'+esc(stateNames[x.state]||String(x.state??"—"))+'</td><td>'+esc(startText)+'</td><td>'+esc(endText)+'</td><td><b>'+esc(nextText)+'</b><small style="display:block;opacity:.9">Termin: '+esc(effectiveAvailable?exactTime(effectiveAvailable):"Brak danych")+'</small><small style="display:block;opacity:.75">'+esc(respawnText)+'</small></td></tr>';
       }).join("");
       return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono wysp: <b>'+rows.length.toLocaleString("pl-PL")+'</b>. Termin API <code>available_at</code> ma priorytet. W pozostałych przypadkach liczymy od zdobycia: mała 6 h okupacji + 36 h odnowienia = 42 h; duża 18 h + 72 h = 90 h.</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Typ wyspy</th><th>Współrzędne</th><th>Zajmujący</th><th>Sojusz</th><th>Stan</th><th>Zdobyta</th><th>Koniec okupacji / dostępność</th><th>Ponowne pojawienie</th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
