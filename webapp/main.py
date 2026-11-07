@@ -580,6 +580,224 @@ async def _get_live_calendar(force: bool = False):
                 return CALENDAR_CACHE["events"]
             raise HTTPException(502, "Nie udało się pobrać kalendarza z Community Hub.")
 
+
+@app.get("/api/bot/targets/search")
+async def bot_target_search(
+    origin_player: str,
+    server: str = "E4K_PL1_BETA",
+    target_alliance: str = "",
+    level_min: int = -1, level_max: int = -1,
+    might_min: int = -1, might_max: int = -1,
+    distance_min: float = -1, distance_max: float = -1,
+    honor_min: int = -1, honor_max: int = -1,
+    glory_min: int = -1, glory_max: int = -1,
+    loot_min: int = -1, loot_max: int = -1,
+    show_doves: bool = False, only_with_alliance: bool = False,
+    excluded_alliances: str = "", activity_filter: str = "all",
+    user: User = Depends(current_user),
+):
+    """Web port of the bot's configurable target radar, with bounded API fan-out."""
+    origin_player = origin_player.strip()
+    if not origin_player or len(origin_player) > 80:
+        raise HTTPException(400, "Podaj nazwę gracza bazowego.")
+    if activity_filter not in ("all", "active", "inactive"):
+        raise HTTPException(400, "Nieprawidłowy filtr aktywności.")
+    bounds = [
+        (level_min, level_max, "poziomu"), (might_min, might_max, "mocy"),
+        (distance_min, distance_max, "odległości"), (honor_min, honor_max, "honoru"),
+        (glory_min, glory_max, "chwały"), (loot_min, loot_max, "łupu"),
+    ]
+    for low, high, label in bounds:
+        if low != -1 and high != -1 and low > high:
+            raise HTTPException(400, f"Minimum nie może być większe od maksimum ({label}).")
+    if len(target_alliance) > 100 or len(excluded_alliances) > 1000:
+        raise HTTPException(400, "Wartość filtra jest zbyt długa.")
+
+    headers = bot_headers(server)
+    base = BOT_API_BASE.rstrip("/")
+    async with httpx.AsyncClient(timeout=12, follow_redirects=True) as client:
+        async def fetch(path: str, params: dict | None = None, missing_ok: bool = False):
+            response = await client.get(base + "/" + path.lstrip("/"), headers=headers, params=params)
+            if response.status_code == 429:
+                raise HTTPException(429, "API GGE Tracker ograniczyło liczbę zapytań. Spróbuj za chwilę.")
+            if response.status_code == 404 and missing_ok:
+                return None
+            if response.status_code >= 400:
+                raise HTTPException(502, f"GGE Tracker zwrócił błąd {response.status_code}.")
+            try:
+                return response.json()
+            except Exception:
+                raise HTTPException(502, "API GGE Tracker zwróciło nieprawidłowy format danych.")
+
+        origin = await fetch("players/" + quote(origin_player, safe=""), missing_ok=True)
+        if isinstance(origin, list):
+            origin = origin[0] if origin else None
+        if not isinstance(origin, dict):
+            raise HTTPException(404, f"Nie znaleziono gracza bazowego: {origin_player}.")
+        origin_name = str(origin.get("playerName") or origin.get("player_name") or origin.get("name") or origin_player)
+        origin_castles = await fetch("castle/search/" + quote(origin_name, safe=""), missing_ok=True)
+        if isinstance(origin_castles, dict):
+            origin_castles = [origin_castles]
+        origin_coords = None
+        for castle in origin_castles if isinstance(origin_castles, list) else []:
+            if not isinstance(castle, dict):
+                continue
+            kid = castle.get("kingdomId", castle.get("kingdom_id", -1))
+            ctype = castle.get("type", castle.get("castle_type", -1))
+            x = castle.get("positionX", castle.get("position_x", castle.get("x")))
+            y = castle.get("positionY", castle.get("position_y", castle.get("y")))
+            if str(kid) == "0" and str(ctype) == "1" and x is not None and y is not None:
+                try:
+                    origin_coords = (float(x), float(y))
+                    break
+                except (TypeError, ValueError):
+                    continue
+        if not origin_coords:
+            raise HTTPException(404, "Nie znaleziono głównego zamku gracza bazowego (królestwo 0).")
+
+        params = {
+            "page": 1, "orderBy": "distance", "orderType": "ASC",
+            "playerNameForDistance": origin_name,
+            "minMight": might_min, "maxMight": might_max,
+            "minHonor": honor_min, "maxHonor": honor_max,
+            "minLoot": loot_min, "maxLoot": loot_max,
+            "minLevel": -1, "minLegendaryLevel": -1,
+            "maxLevel": -1, "maxLegendaryLevel": -1,
+            "allianceFilter": 1 if only_with_alliance else -1,
+            "protectionFilter": -1 if show_doves else 0,
+            "banFilter": -1, "inactiveFilter": -1,
+        }
+        if activity_filter == "active":
+            params["inactiveFilter"] = 0
+        elif activity_filter == "inactive":
+            params["inactiveFilter"] = 1
+        if level_min != -1:
+            params["minLevel"] = min(level_min, 70)
+            params["minLegendaryLevel"] = max(0, level_min - 70)
+        if level_max != -1:
+            params["maxLevel"] = min(level_max, 70)
+            params["maxLegendaryLevel"] = max(0, level_max - 70)
+        if target_alliance.strip():
+            params["alliance"] = target_alliance.strip()
+
+        first = await fetch("players", params)
+        def unpack(payload):
+            if isinstance(payload, list):
+                return payload, {}
+            if not isinstance(payload, dict):
+                return [], {}
+            rows = payload.get("players", payload.get("items", payload.get("data", [])))
+            meta = payload.get("pagination", payload)
+            return (rows if isinstance(rows, list) else []), (meta if isinstance(meta, dict) else {})
+        first_rows, meta = unpack(first)
+        total_pages = meta.get("total_pages", meta.get("totalPages", meta.get("last_page", 1))) or 1
+        if meta.get("total") and not meta.get("total_pages") and not meta.get("totalPages"):
+            try:
+                total_pages = max(1, (int(meta["total"]) + 49) // 50)
+            except (TypeError, ValueError):
+                total_pages = 1
+        try:
+            total_pages = max(1, min(int(total_pages), 200))
+        except (TypeError, ValueError):
+            total_pages = 1
+
+        pages = [(1, first_rows)]
+        max_pages = min(total_pages, 12)
+        for page_number in range(2, max_pages + 1):
+            page_params = dict(params)
+            page_params["page"] = page_number
+            payload = await fetch("players", page_params)
+            rows, _ = unpack(payload)
+            pages.append((page_number, rows))
+
+        excluded = {
+            "".join(ch for ch in item.casefold() if ch.isalnum())
+            for item in excluded_alliances.split(",") if item.strip()
+        }
+        semaphore = asyncio.Semaphore(6)
+        checked_names = set()
+        results = []
+        async def evaluate(player):
+            if not isinstance(player, dict):
+                return None
+            name = str(player.get("player_name") or player.get("name") or "").strip()
+            if not name or name.casefold() == origin_name.casefold() or name.casefold() in checked_names:
+                return None
+            checked_names.add(name.casefold())
+            alliance = player.get("alliance_name") or player.get("alliance") or ""
+            if isinstance(alliance, dict):
+                alliance = alliance.get("name", "")
+            alliance = str(alliance or "")
+            if alliance.startswith("[") and alliance.endswith("]"):
+                alliance = alliance[1:-1]
+            alliance_key = "".join(ch for ch in alliance.casefold() if ch.isalnum())
+            if alliance_key in excluded or any(alliance_key == banned or banned in alliance_key for banned in excluded if banned):
+                return None
+            try:
+                level = int(player.get("level") or 0)
+                legendary = int(player.get("legendary_level") or 0)
+                might = int(player.get("might_current") or 0)
+                honor = int(player.get("honor") or 0)
+                glory = int(player.get("current_fame", player.get("highest_fame", 0)) or 0)
+                loot = int(player.get("loot_current") or 0)
+            except (TypeError, ValueError):
+                return None
+            absolute_level = level + legendary
+            for value, low, high in (
+                (absolute_level, level_min, level_max), (might, might_min, might_max),
+                (honor, honor_min, honor_max), (glory, glory_min, glory_max), (loot, loot_min, loot_max),
+            ):
+                if (low != -1 and value < low) or (high != -1 and value > high):
+                    return None
+            async with semaphore:
+                castles = await fetch("castle/search/" + quote(name, safe=""), missing_ok=True)
+            if isinstance(castles, dict):
+                castles = [castles]
+            coords = None
+            for castle in castles if isinstance(castles, list) else []:
+                if not isinstance(castle, dict):
+                    continue
+                if str(castle.get("kingdomId", castle.get("kingdom_id", -1))) == "0" and str(castle.get("type", castle.get("castle_type", -1))) == "1":
+                    x = castle.get("positionX", castle.get("position_x", castle.get("x")))
+                    y = castle.get("positionY", castle.get("position_y", castle.get("y")))
+                    if x is not None and y is not None:
+                        try:
+                            coords = (float(x), float(y))
+                            break
+                        except (TypeError, ValueError):
+                            pass
+            if not coords:
+                return None
+            distance = ((coords[0] - origin_coords[0]) ** 2 + (coords[1] - origin_coords[1]) ** 2) ** 0.5
+            if (distance_min != -1 and distance < distance_min) or (distance_max != -1 and distance > distance_max):
+                return None
+            peace_until = player.get("peace_disabled_at")
+            return {
+                "name": name, "alliance": alliance, "level": level, "legendary_level": legendary,
+                "absolute_level": absolute_level, "might": might, "honor": honor, "glory": glory,
+                "loot": loot, "distance": round(distance, 2), "x": coords[0], "y": coords[1],
+                "peace_disabled_at": peace_until, "has_protection": bool(show_doves and peace_until),
+            }
+
+        valid_count = 0
+        scanned_pages = []
+        for page_number, rows in pages:
+            scanned_pages.append(page_number)
+            evaluated = await asyncio.gather(*(evaluate(player) for player in rows))
+            page_results = [item for item in evaluated if item]
+            valid_count += len(page_results)
+            results.extend(page_results)
+            if len(results) >= 10:
+                break
+        results.sort(key=lambda item: item["distance"])
+        return {
+            "server": server.upper(), "origin_player": origin_name,
+            "origin_coordinates": {"x": origin_coords[0], "y": origin_coords[1]},
+            "results": results[:10], "valid_targets_found": valid_count,
+            "scanned_pages": scanned_pages, "total_pages_available": total_pages,
+            "truncated": len(scanned_pages) < total_pages,
+        }
+
 @app.get("/api/bot/calendar")
 async def bot_calendar(view: str = "main", refresh: bool = False, user: User = Depends(current_user)):
     if view not in ("main", "future", "alliance"):
