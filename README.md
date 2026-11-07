@@ -101,7 +101,9 @@
 │   └── runtime.py
 ├── site
 │   ├── index.html
-│   └── mapa-sojuszy.html
+│   ├── manifest.webmanifest
+│   ├── mapa-sojuszy.html
+│   └── sw.js
 ├── webapp
 │   ├── main.py
 │   └── requirements.txt
@@ -118,7 +120,7 @@
 ├── ruff.toml
 └── utils.py
 
-13 directories, 60 files
+13 directories, 62 files
 ```
 <!-- TREE-END -->
 *(This section is auto-updated via GitHub Actions)*
