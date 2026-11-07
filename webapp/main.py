@@ -139,11 +139,12 @@ def login(body: Credentials, db: Session = Depends(get_db)):
 def me(user: User = Depends(current_user)):
     return {"id": user.id, "email": user.email, "created_at": user.created_at.isoformat()}
 
-SERVERS = ["PL1","PL2","INT1","DE1","FR1","E4K_PL1","E4K_FR1","E4K_DE1","E4K_INT1"]
+SERVERS = ["PL1","PL2","INT1","DE1","FR1","E4K_PL1","E4K_PL1_BETA","E4K_FR1","E4K_DE1","E4K_INT1"]
 def game_headers(server: str):
-    if not re.fullmatch(r"[A-Za-z0-9_-]{2,24}", server):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
         raise HTTPException(400, "Nieprawidłowy identyfikator serwera.")
-    headers = {"Accept":"application/json","gge-server":server.upper(),"User-Agent":"Empiremaps-Web/0.1"}
+    server_id = "EmpirefourkingdomsExGG2_3" if server.upper() == "E4K_PL1_BETA" else server.upper()
+    headers = {"Accept":"application/json","gge-server":server_id,"User-Agent":"Empiremaps-Web/0.1"}
     key = os.getenv("GGETRACKER_API_KEY")
     if key:
         headers["X-Api-Key"] = key
