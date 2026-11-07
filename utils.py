@@ -1,10 +1,8 @@
 import asyncio
-import gc
 import json
 import logging
 import os
 import random
-import re
 import time
 import urllib.parse
 from datetime import datetime, timedelta
@@ -13,10 +11,7 @@ from pathlib import Path
 import discord
 from discord import app_commands
 
-import observability as obs
-
 logger = logging.getLogger("GGE_Bot")
-BOT_VERSION = "GGE Assistant • Version 1.4.0"
 
 # ========================================
 # ⚙️ GESTION DES CHEMINS & DOSSIER
@@ -34,105 +29,60 @@ ADMINS_DIR = BASE_DATA_PATH / "admins"
 for directory in [CONFIG_DIR, JOUEURS_DIR, SERVEURS_DIR, ADMINS_DIR, LOCALES_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-# ========================================
-# ⚙️ RECUPERATION .ENV
-# ========================================
 
-MON_ID_DISCORD = int(os.getenv("MON_ID_DISCORD", 0))
-TOKEN = os.getenv("DISCORD_TOKEN")
-TOPGG_TOKEN = os.getenv("TOPGG_TOKEN")
-
-
-# ========================================
-# 📦 CACHE MANAGER (BPA-06)
-# ========================================
-
-
-class CacheManager:
-    """Gestionnaire centralisé pour remplacer les variables globales mutables."""
-
-    def __init__(self):
-        self.server_data = {}
-        self.users_config = None
-        self.guilds_config = None
-        self.blocks = None
-        self.file_locks = {}
-        self.translations = {}
-
-    def clear_configs(self):
-        self.users_config = None
-        self.guilds_config = None
-
-
-cache_mngr = CacheManager()
+USERS_CONFIG_CACHE = None
+GUILDS_CONFIG_CACHE = None
+BLOCKS_CACHE = None
 
 
 def clear_config_cache():
-    cache_mngr.clear_configs()
-
-
-# ========================================
-# CONFIGURATION UTILISATEUR
-# ========================================
+    global USERS_CONFIG_CACHE, GUILDS_CONFIG_CACHE
+    USERS_CONFIG_CACHE = None
+    GUILDS_CONFIG_CACHE = None
 
 
 async def get_server_config(interaction: discord.Interaction):
+    global USERS_CONFIG_CACHE, GUILDS_CONFIG_CACHE
+
     default_lang = "fr"
     default_server = "E4K_FR1"
 
-    if cache_mngr.users_config is None:
+    if USERS_CONFIG_CACHE is None:
         path_users = CONFIG_DIR / "users.json"
         if path_users.exists():
             try:
-
-                def _read_users():
-                    with open(path_users, encoding="utf-8") as f:
-                        return json.load(f)
-
-                cache_mngr.users_config = await asyncio.to_thread(_read_users)
-            except Exception as e:
-                logger.error(f"❌ [Utils] Erreur lors du chargement de users.json : {e}")
-                obs.record_error(source="utils", scope="load_users_config", exception=e, cog="utils")
-                cache_mngr.users_config = {}
+                with open(path_users, encoding="utf-8") as f:
+                    USERS_CONFIG_CACHE = json.load(f)
+            except:
+                USERS_CONFIG_CACHE = {}
         else:
-            cache_mngr.users_config = {}
+            USERS_CONFIG_CACHE = {}
 
     user_id = str(interaction.user.id)
-    if user_id in cache_mngr.users_config:
-        u_lang = cache_mngr.users_config[user_id].get("langue", default_lang)
-        u_srv = cache_mngr.users_config[user_id].get("gge_server", default_server)
+    if user_id in USERS_CONFIG_CACHE:
+        u_lang = USERS_CONFIG_CACHE[user_id].get("langue", default_lang)
+        u_srv = USERS_CONFIG_CACHE[user_id].get("gge_server", default_server)
         return u_lang, u_srv
 
     if interaction.guild:
-        if cache_mngr.guilds_config is None:
+        if GUILDS_CONFIG_CACHE is None:
             path_guilds = CONFIG_DIR / "serveurs.json"
             if path_guilds.exists():
                 try:
-
-                    def _read_guilds():
-                        with open(path_guilds, encoding="utf-8") as f:
-                            return json.load(f)
-
-                    cache_mngr.guilds_config = await asyncio.to_thread(_read_guilds)
-                except Exception as e:
-                    logger.error(f"❌ [Utils] Erreur lors du chargement de serveurs.json : {e}")
-                    obs.record_error(source="utils", scope="load_guilds_config", exception=e, cog="utils")
-                    cache_mngr.guilds_config = {}
+                    with open(path_guilds, encoding="utf-8") as f:
+                        GUILDS_CONFIG_CACHE = json.load(f)
+                except:
+                    GUILDS_CONFIG_CACHE = {}
             else:
-                cache_mngr.guilds_config = {}
+                GUILDS_CONFIG_CACHE = {}
 
         guild_id = str(interaction.guild.id)
-        if guild_id in cache_mngr.guilds_config:
-            g_lang = cache_mngr.guilds_config[guild_id].get("langue", default_lang)
-            g_srv = cache_mngr.guilds_config[guild_id].get("gge_server", default_server)
+        if guild_id in GUILDS_CONFIG_CACHE:
+            g_lang = GUILDS_CONFIG_CACHE[guild_id].get("langue", default_lang)
+            g_srv = GUILDS_CONFIG_CACHE[guild_id].get("gge_server", default_server)
             return g_lang, g_srv
 
     return default_lang, default_server
-
-
-# ========================================
-# HEADERS
-# ========================================
 
 
 async def get_api_headers(interaction: discord.Interaction = None, custom_server: str = None):
@@ -142,71 +92,49 @@ async def get_api_headers(interaction: discord.Interaction = None, custom_server
     elif interaction:
         _, server = await get_server_config(interaction)
 
-    headers = {
-        "Accept": "application/json",
-        "gge-server": server,
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) GGE-Assistant/3.0 (Async)",
-    }
+    return {"accept": "application/json", "gge-server": server, "User-Agent": "Mozilla/5.0 GGE-Assistant/2.0"}
 
-    api_key = os.getenv("GGETRACKER_API_KEY")
-    if api_key:
-        headers["X-Api-Key"] = api_key
-
-    return headers
-
-
-# ========================================
-# EMOJIS ET TRADUCTIONS
-# ========================================
 
 try:
     from emojis import DICT_EMOJIS
 except ImportError as e:
-    logger.error(f"❌ [Utils] Impossible de charger les émojis suivants : {e}")
-    obs.record_error(source="utils", scope="import_emojis", exception=e, cog="utils")
+    logger.error(f"❌ Impossible de charger les émojis suivants : {e}")
     DICT_EMOJIS = {}
+
+_translations = {}
+
+
+class SafeDict(dict):
+    def __missing__(self, key):
+        return f"{{{key}}}"
 
 
 def charger_langues():
-    cache_mngr.translations.clear()
+    _translations.clear()
     if not LOCALES_DIR.exists():
-        logger.warning(f"⚠️ [i18n] Le dossier des langues n'existe pas : {LOCALES_DIR}")
+        logger.warning(f"⚠️ Le dossier des langues n'existe pas : {LOCALES_DIR}")
         return
 
     for fichier in LOCALES_DIR.glob("*.json"):
         langue = fichier.stem
         try:
             with open(fichier, encoding="utf-8") as f:
-                cache_mngr.translations[langue] = json.load(f)
-            logger.info(f"📚 [i18n] Langue chargée : {langue.upper()} ({len(cache_mngr.translations[langue])} clés)")
+                _translations[langue] = json.load(f)
+            logger.info(f"📚 Langue chargée : {langue.upper()} ({len(_translations[langue])} clés)")
         except Exception as e:
-            logger.error(f"❌ [i18n] Erreur lors du chargement de {fichier.name} : {e}")
-            obs.record_error(source="utils", scope="load_locales", exception=e, cog="utils")
+            logger.error(f"❌ Erreur lors du chargement de {fichier.name} : {e}")
 
 
 def t(langue: str, cle: str, defaut: str = None, **kwargs) -> str:
-    dico_lang = cache_mngr.translations.get(langue, {})
-    dico_en = cache_mngr.translations.get("en", {})
-    dico_fr = cache_mngr.translations.get("fr", {})
-
-    texte = dico_lang.get(cle)
-    if texte is None:
-        texte = dico_en.get(cle)
-    if texte is None:
-        texte = dico_fr.get(cle)
-    if texte is None:
-        texte = defaut if defaut is not None else f"[{cle}_MANQUANT]"
+    dico = _translations.get(langue, _translations.get("fr", {}))
+    texte = dico.get(cle, defaut if defaut else f"[{cle}_MANQUANT]")
 
     variables_fusionnees = {**DICT_EMOJIS, **kwargs}
+
     if variables_fusionnees:
-        texte = re.sub(r"\{(\w+)\}", lambda m: str(variables_fusionnees.get(m.group(1), m.group(0))), str(texte))
+        return texte.format_map(SafeDict(**variables_fusionnees))
 
     return texte
-
-
-# ========================================
-# CLASSE PAGINATION
-# ========================================
 
 
 class PaginationView(discord.ui.View):
@@ -231,6 +159,7 @@ class PaginationView(discord.ui.View):
         self.update_buttons()
 
     async def on_timeout(self):
+        """Grise tous les boutons de la vue à l'expiration du timeout."""
         for child in self.children:
             child.disabled = True
 
@@ -240,7 +169,7 @@ class PaginationView(discord.ui.View):
             except discord.HTTPException:
                 pass
             except Exception as e:
-                logger.error(f"❌ [UI] Erreur désactivation boutons PaginationView : {e}")
+                logger.error(f"❌ Erreur désactivation boutons PaginationView : {e}")
 
     def update_buttons(self):
         self.btn_prev.disabled = self.current_page == 0
@@ -262,6 +191,8 @@ class PaginationView(discord.ui.View):
 
 
 class RefreshOnlyView(discord.ui.View):
+    """Une vue avec uniquement un bouton Refresh qui se désactive aussi après un timeout."""
+
     def __init__(self, callback_func, langue="fr", timeout=3600):
         super().__init__(timeout=timeout)
         self.message = None
@@ -276,6 +207,7 @@ class RefreshOnlyView(discord.ui.View):
         self.add_item(self.refresh_btn)
 
     async def cb_refresh(self, interaction: discord.Interaction):
+
         if not self.message:
             self.message = interaction.message
         await self.callback_func(interaction)
@@ -290,24 +222,17 @@ class RefreshOnlyView(discord.ui.View):
                 pass
 
 
-# ========================================
-# VOTES ET RAPPELS
-# ========================================
-
 VOTES_FILE = JOUEURS_DIR / "votes.json"
 
 
 async def prompt_vote_if_lucky(interaction: discord.Interaction, probability_percent: int, langue: str = "fr"):
+    """Vérifie si le joueur est protégé par les 7 jours. Sinon, lance le dé."""
     user_id_str = str(interaction.user.id)
 
     if VOTES_FILE.exists():
         try:
-
-            def _read_votes():
-                with open(VOTES_FILE, encoding="utf-8") as f:
-                    return json.load(f)
-
-            votes_data = await asyncio.to_thread(_read_votes)
+            with open(VOTES_FILE, encoding="utf-8") as f:
+                votes_data = json.load(f)
 
             if user_id_str in votes_data:
                 deadline = datetime.fromisoformat(votes_data[user_id_str])
@@ -315,8 +240,7 @@ async def prompt_vote_if_lucky(interaction: discord.Interaction, probability_per
                     return
 
         except Exception as e:
-            logger.error(f"❌ [Vote] Erreur lors de la lecture de votes.json : {e}")
-            obs.record_error(source="utils", scope="vote_shield", exception=e, cog="utils")
+            print(f"❌ [DEBUG VOTE] Erreur lors de la lecture du bouclier : {e}")
 
     if random.randint(1, 100) > probability_percent:
         return
@@ -350,12 +274,11 @@ async def prompt_vote_if_lucky(interaction: discord.Interaction, probability_per
         pass
 
 
-# ========================================
-# RESULTAT API
-# ========================================
-
-
 def _get_api_timestamp(*sources):
+    """
+    Explore de manière récursive et profonde les structures de données renvoyées par l'API.
+    Traque TOUTES les dates trouvées pour s'assurer d'extraire la plus récente.
+    """
     dates_trouvees = []
 
     def search_ts(obj):
@@ -396,11 +319,6 @@ def _get_api_timestamp(*sources):
     return discord.utils.utcnow()
 
 
-# ========================================
-# FORMAT DES NOMBRES
-# ========================================
-
-
 def format_num(n):
     try:
         n = int(n)
@@ -418,11 +336,6 @@ def format_num(n):
         return "0"
 
 
-# ========================================
-# TIMESTAMP DISCORD
-# ========================================
-
-
 def get_discord_timestamp(iso_str, style="R", langue="fr"):
     try:
         dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
@@ -431,56 +344,33 @@ def get_discord_timestamp(iso_str, style="R", langue="fr"):
         return t(langue, "utils_unknown_date", defaut="Date inconnue")
 
 
-# ========================================
-# RECUPERATION DONNEES EN CACHE
-# ========================================
-
-
 async def get_cached_data(serveur="E4K_FR1"):
-    if len(cache_mngr.server_data) >= 1 and serveur not in cache_mngr.server_data:
-        logger.info(f"🧹 [Cache] Anti-OOM : Vidage du cache mémoire complet pour charger {serveur}.")
-        cache_mngr.server_data.clear()
-        gc.collect()
+    global CACHE
 
-    if serveur not in cache_mngr.server_data:
-        cache_mngr.server_data[serveur] = {
-            "players": [],
-            "players_data": {},
-            "alliances": [],
-            "alliance_members": {},
-            "last_refresh": 0,
-        }
+    if serveur not in CACHE:
+        CACHE[serveur] = {"players": [], "players_data": {}, "alliances": [], "alliance_members": {}, "last_refresh": 0}
 
     def _lecture_lourde():
-        dossier_serveur = BASE_DATA_PATH / "server_scans" / serveur
-        if not dossier_serveur.exists():
-            return {}
-
-        player_files = list(dossier_serveur.rglob("server_*.json"))
-        if not player_files:
-            return {}
-
-        latest = max(player_files, key=lambda p: p.stat().st_mtime)
-
         try:
+            dossier_serveur = BASE_DATA_PATH / "server_scans" / serveur
+            if not dossier_serveur.exists():
+                return {}
+
+            player_files = list(dossier_serveur.rglob("server_*.json"))
+            if not player_files:
+                return {}
+
+            latest = max(player_files, key=lambda p: p.stat().st_mtime)
             with open(latest, encoding="utf-8") as f:
                 return json.load(f).get("players", {})
-        except json.JSONDecodeError as e:
-            logger.error(f"❌ [Cache] Fichier corrompu détecté pour {serveur} : {e}. Suppression du fichier...")
-            try:
-                latest.unlink()
-            except OSError as err:
-                logger.error(f"❌ [Cache] Impossible de supprimer le fichier corrompu : {err}")
-            return {}
         except Exception as e:
             logger.error(f"❌ [Cache] Erreur lors de la lecture lourde de {serveur} : {e}")
-            obs.record_error(source="utils", scope="cache_load", exception=e, cog="utils")
             return {}
 
-    if time.time() - cache_mngr.server_data[serveur]["last_refresh"] > 300:
+    if time.time() - CACHE[serveur]["last_refresh"] > 300:
         players_data = await asyncio.to_thread(_lecture_lourde)
-        cache_mngr.server_data[serveur]["players_data"] = players_data
-        cache_mngr.server_data[serveur]["players"] = list(players_data.keys())
+        CACHE[serveur]["players_data"] = players_data
+        CACHE[serveur]["players"] = list(players_data.keys())
 
         alliances_set = set()
         alliance_members = {}
@@ -494,74 +384,29 @@ async def get_cached_data(serveur="E4K_FR1"):
                     alliance_members[a_name] = []
                 alliance_members[a_name].append(p_name)
 
-        cache_mngr.server_data[serveur]["alliances"] = list(alliances_set)
-        cache_mngr.server_data[serveur]["alliance_members"] = alliance_members
-        cache_mngr.server_data[serveur]["last_refresh"] = time.time()
+        CACHE[serveur]["alliances"] = list(alliances_set)
+        CACHE[serveur]["alliance_members"] = alliance_members
+        CACHE[serveur]["last_refresh"] = time.time()
 
-    return cache_mngr.server_data[serveur]
-
-
-async def find_player_in_cache(serveur: str, player_name: str):
-    cache = await get_cached_data(serveur)
-    players_data = cache.get("players_data", {})
-
-    for p_name, p_info in players_data.items():
-        if p_name.lower() == player_name.lower():
-            return p_name, p_info
-
-    return player_name, None
-
-
-# ========================================
-# LECTURE DES INDEX ULTRA-LÉGERS
-# ========================================
-
-
-async def get_autocomplete_list(serveur: str, type_liste: str):
-    def _lecture_index():
-        try:
-            dossier_serveur = BASE_DATA_PATH / "server_scans" / serveur
-            if not dossier_serveur.exists():
-                return []
-
-            date_dirs = sorted([d for d in dossier_serveur.iterdir() if d.is_dir()], reverse=True)
-            if not date_dirs:
-                return []
-
-            index_file = date_dirs[0] / f"{type_liste}_autocomplete.json"
-            if index_file.exists():
-                with open(index_file, encoding="utf-8") as f:
-                    return json.load(f)
-            return []
-        except Exception:
-            return []
-
-    return await asyncio.to_thread(_lecture_index)
-
-
-# ========================================
-# FONCTIONS AUTOCOMPLETE DISCORD
-# ========================================
+    return CACHE[serveur]
 
 
 async def joueur_autocomplete(interaction: discord.Interaction, current: str):
     _, serveur = await get_server_config(interaction)
-    joueurs = await get_autocomplete_list(serveur, "players")
-
+    data = await get_cached_data(serveur)
     return [
         app_commands.Choice(name=str(n)[:100], value=str(n)[:100])
-        for n in joueurs
+        for n in data.get("players", [])
         if current.lower() in str(n).lower() and str(n).strip()
     ][:25]
 
 
 async def alliance_autocomplete(interaction: discord.Interaction, current: str):
     _, serveur = await get_server_config(interaction)
-    alliances = await get_autocomplete_list(serveur, "alliances")
-
+    data = await get_cached_data(serveur)
     return [
         app_commands.Choice(name=str(n)[:100], value=str(n)[:100])
-        for n in alliances
+        for n in data.get("alliances", [])
         if current.lower() in str(n).lower() and str(n).strip()
     ][:25]
 
@@ -572,6 +417,7 @@ async def event_autocomplete(interaction: discord.Interaction, current: str):
         "Samurai Invasion",
         "Bloodcrow Invasion",
         "War of the Realms",
+        "Storm Islands",
         "Battle of Berimond",
     ]
     return [app_commands.Choice(name=e, value=e) for e in events_en if current.lower() in e.lower()][:25]
@@ -580,11 +426,6 @@ async def event_autocomplete(interaction: discord.Interaction, current: str):
 async def event_alliance_autocomplete(interaction: discord.Interaction, current: str):
     events_en = ["Nomad Invasion", "Samurai Invasion", "Bloodcrow Invasion", "War of the Realms", "Battle of Berimond"]
     return [app_commands.Choice(name=e, value=e) for e in events_en if current.lower() in e.lower()][:25]
-
-
-# ========================================
-# FONCTION EMBED RESULTAT EVENT
-# ========================================
 
 
 async def generer_rapport_alliance_embed(
@@ -759,7 +600,7 @@ async def generer_rapport_alliance_embed(
     )
 
     embed = discord.Embed(
-        title=f"{DICT_EMOJIS.get('e_alliance_icon', '🛡️')} {alliance_name} | {event_name}",
+        title=f"{DICT_EMOJIS.get('e_alliance_icon', '🛡️')} {alliance_name} - {event_name}",
         color=clr_alliance,
         timestamp=discord.utils.utcnow(),
     )
@@ -808,154 +649,11 @@ async def generer_rapport_alliance_embed(
     return embed, lignes_classement, stats_text, global_latest_str
 
 
-# ==========================================
-# 🌍 CORRESPONDANCE DES SERVEURS (FLY.DEV)
-# ==========================================
-FLYDEV_MAPPING = {
-    "int1": "EmpireEx",
-    "de1": "EmpireEx_2",
-    "fr1": "EmpireEx_3",
-    "cz1": "EmpireEx_4",
-    "pl1": "EmpireEx_5",
-    "pt1": "EmpireEx_6",
-    "int2": "EmpireEx_7",
-    "es1": "EmpireEx_8",
-    "it1": "EmpireEx_9",
-    "tr1": "EmpireEx_10",
-    "nl1": "EmpireEx_11",
-    "hu1": "EmpireEx_12",
-    "skn1": "EmpireEx_13",
-    "ru1": "EmpireEx_14",
-    "ro1": "EmpireEx_15",
-    "bg1": "EmpireEx_16",
-    "hu2": "EmpireEx_17",
-    "sk1": "EmpireEx_18",
-    "gb1": "EmpireEx_19",
-    "br1": "EmpireEx_20",
-    "us1": "EmpireEx_21",
-    "au1": "EmpireEx_22",
-    "kr1": "EmpireEx_23",
-    "jp1": "EmpireEx_24",
-    "his1": "EmpireEx_25",
-    "in1": "EmpireEx_26",
-    "cn1": "EmpireEx_27",
-    "gr1": "EmpireEx_28",
-    "lt1": "EmpireEx_29",
-    "sa1": "EmpireEx_32",
-    "ae1": "EmpireEx_33",
-    "eg1": "EmpireEx_34",
-    "arab1": "EmpireEx_35",
-    "asia": "EmpireEx_36",
-    "hant1": "EmpireEx_37",
-    "es2": "EmpireEx_38",
-    "int3": "EmpireEx_43",
-    "world1": "EmpireEx_46",
-    "world2": "EmpireEx_49",
-    "global": None,
-    "partner_sp3": None,
-    "e4k_ro1": None,
-    "e4k_hu1": None,
-    "e4k_cz1": None,
-    "e4k_sk1": None,
-    "e4k_bg1": None,
-    "e4k_hr1": None,
-    "e4k_se1": None,
-    "e4k_no1": None,
-    "e4k_fi1": None,
-    "e4k_dk1": None,
-    "e4k_tw1": None,
-    "e4k_int1": None,
-    "e4k_de1": "EmpirefourkingdomsExGG",
-    "e4k_fr1": "EmpirefourkingdomsExGG_2",
-    "e4k_pl1": "EmpirefourkingdomsExGG_3",
-    "e4k_us1": "EmpirefourkingdomsExGG_4",
-    "e4k_gb1": "EmpirefourkingdomsExGG_5",
-    "e4k_nl1": "EmpirefourkingdomsExGG_6",
-    "e4k_es1": "EmpirefourkingdomsExGG_7",
-    "e4k_pt1": "EmpirefourkingdomsExGG_8",
-    "e4k_it1": "EmpirefourkingdomsExGG_9",
-    "e4k_ru1": "EmpirefourkingdomsExGG_10",
-    "e4k_skn1": "EmpirefourkingdomsExGG_11",
-    "e4k_his1": "EmpirefourkingdomsExGG_12",
-    "e4k_br1": "EmpirefourkingdomsExGG_13",
-    "e4k_jp1": "EmpirefourkingdomsExGG_14",
-    "e4k_kr1": "EmpirefourkingdomsExGG_15",
-    "e4k_cn1": "EmpirefourkingdomsExGG_16",
-    "e4k_au1": "EmpirefourkingdomsExGG_17",
-    "e4k_ph1": "EmpirefourkingdomsExGG_18",
-    "e4k_ar1": "EmpirefourkingdomsExGG_19",
-    "e4k_mx1": "EmpirefourkingdomsExGG_20",
-    "e4k_int2": "EmpirefourkingdomsExGG_21",
-    "e4k_tr1": "EmpirefourkingdomsExGG_22",
-    "e4k_gr1": "EmpirefourkingdomsExGG_23",
-    "e4k_arab1": "EmpirefourkingdomsExGG_24",
-    "e4k_in1": "EmpirefourkingdomsExGG_25",
-    "e4k_id1": "EmpirefourkingdomsExGG_26",
-    "e4k_asia1": "EmpirefourkingdomsExGG_27",
-    "e4k_de2": "EmpirefourkingdomsExGG_28",
-    "e4k_us2": "EmpirefourkingdomsExGG_29",
-    "e4k_hant1": "EmpirefourkingdomsExGG_30",
-    "e4k_ru2": "EmpirefourkingdomsExGG_31",
-    "e4k_int3": "EmpirefourkingdomsExGG_32",
-    "e4k_int4": "EmpirefourkingdomsExGG_34",
-    "e4k_world1": "EmpirefourkingdomsExGG_36",
-    "e4k_world2": "EmpirefourkingdomsExGG_37",
-}
+MON_ID_DISCORD = int(os.getenv("MON_ID_DISCORD", 0))
+TOKEN = os.getenv("DISCORD_TOKEN")
+TOPGG_TOKEN = os.getenv("TOPGG_TOKEN")
 
-# ==========================================
-# 📊 CONSTANTES DES ÉVÉNEMENTS & CLASSEMENTS
-# ==========================================
-
-EVENT_IDS = {
-    "achievements": 1,
-    "plunder": 2,
-    "honor": 5,
-    "might": 6,
-    "legendary": 7,
-    "berimond": 30,
-    "nobility": 40,
-    "foreigners": 44,
-    "nomads": 46,
-    "samurais": 51,
-    "season": 53,
-    "bloodcrows": 58,
-    "shapeshifters": 60,
-    "master": 61,
-    "league": 63,
-    "woa": 72,
-    "realms": 76,
-    "horizon": 78,
-    "patronage": 79,
-    "flora": 80,
-    "snowglobe": 81,
-    "hollowmoon": 82,
-    "sandfortune": 83,
-    "banquet": 85,
-    "midnight": 87,
-    "alliance_honor": 10,
-    "alliance_might": 11,
-    "alliance_command": 12,
-    "alliance_cargo": 13,
-    "alliance_foreigners": 45,
-    "alliance_nomad": 47,
-    "alliance_samurais": 52,
-    "alliance_bloodcrows": 59,
-    "alliance_league": 67,
-    "alliance_horizon": 77,
-}
-
-BRACKETS = {
-    "1": "Niveaux Classiques (< 70)",
-    "2": "Légendaire 1 - 299",
-    "3": "Légendaire 300 - 649",
-    "4": "Légendaire 650 - 949",
-    "5": "Légendaire 950+",
-    "6": "Niveau 70",
-}
-
-# ==========================================
-# CORRESPONDANCE NOM DES EVENTS
-# ==========================================
+CACHE = {}
 
 TRACKER_EVENTS = {
     "Nomades": ["player_event_nomad_history"],
@@ -972,124 +670,18 @@ TRACKER_EVENTS = {
     "Battle of Berimond": ["player_event_berimond_invasion_history", "player_event_berimond_kingdom_history"],
 }
 
-# ==========================================
-# GESTION DES EVENEMENTS ET DESCIPRTIONS
-# ==========================================
 
-EVENT_MAPPING = {
-    "samurai invasion": {
-        "name_key": "cal_ev_samurai",
-        "name_default": "Samouraï",
-        "emoji": "{e_samurai}",
-        "color": 0xBF0000,
-        "tracker_name": "Samouraïs",
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "nomad invasion": {
-        "name_key": "cal_ev_nomad",
-        "name_default": "Nomade",
-        "emoji": "{e_nomads}",
-        "color": 0xEDC951,
-        "tracker_name": "Nomades",
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "bloodcrow invasion": {
-        "name_key": "cal_ev_bloodcrow",
-        "name_default": "Corbeaux de Sang",
-        "emoji": "{e_bloodcrow}",
-        "color": 0xEDC951,
-        "tracker_name": "Corbeaux de Sang",
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "war of the realms": {
-        "name_key": "cal_ev_realms",
-        "name_default": "Guerre des Royaumes",
-        "emoji": "{e_war_realms}",
-        "color": 0xA69EB0,
-        "tracker_name": "Guerre des Royaumes",
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "berimond": {
-        "name_key": "cal_ev_berimond",
-        "name_default": "Bérimond",
-        "emoji": "{e_berimond}",
-        "color": 0x4B86B4,
-        "tracker_name": "Bataille de Bérimond",
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "bladecoast": {
-        "name_key": "cal_ev_bladecoast",
-        "name_default": "Côte Tranchante",
-        "emoji": "{e_bladecoast}",
-        "color": 0xBFB5B2,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "rift raid": {
-        "name_key": "cal_ev_rift",
-        "name_default": "Raid de la Faille",
-        "emoji": "{e_riftraid}",
-        "color": 0xFB2E01,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "grand tournament": {
-        "name_key": "cal_ev_tournament",
-        "name_default": "Grand Tournoi",
-        "emoji": "{e_grandtournament}",
-        "color": 0x03396C,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "beyond the horizon": {
-        "name_key": "cal_ev_horizon",
-        "name_default": "Au-delà de l'horizon",
-        "emoji": "{e_bth}",
-        "color": 0x006666,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "00:40",
-    },
-    "outer realms": {
-        "name_key": "cal_ev_outer",
-        "name_default": "Royaumes extérieurs",
-        "emoji": "{e_outerrealmsicon}",
-        "color": 0xFFE28A,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "00:40",
-    },
-    "imperial patronage": {
-        "name_key": "cal_ev_patronage",
-        "name_default": "Patronage impérial",
-        "emoji": "{e_patronage}",
-        "color": 0xE8702A,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "10:00",
-    },
-    "grand nobility contest": {
-        "name_key": "cal_ev_nobility",
-        "name_default": "Grand concours de noblesse",
-        "emoji": "{e_ltpe}",
-        "color": 0xE8702A,
-        "tracker_name": None,
-        "start": "11:00",
-        "end": "10:00",
-    },
-}
+FILE_LOCKS = {}
 
-# ==========================================
-# FOOTER COMMUN TOUT EMBED
-# ==========================================
+
+def get_file_lock(filepath):
+    path_key = str(Path(filepath).resolve())
+    if path_key not in FILE_LOCKS:
+        FILE_LOCKS[path_key] = asyncio.Lock()
+    return FILE_LOCKS[path_key]
+
+
+BOT_VERSION = "GGE Assistant • Version 1.2.5"
 
 
 async def setup_embed_footer(
@@ -1104,144 +696,6 @@ async def setup_embed_footer(
     embed.set_footer(text=txt)
 
 
-# ==========================================
-# FILELOCK
-# ==========================================
-
-
-def get_file_lock(filepath):
-    path_key = str(Path(filepath).resolve())
-    if path_key not in cache_mngr.file_locks:
-        cache_mngr.file_locks[path_key] = asyncio.Lock()
-    return cache_mngr.file_locks[path_key]
-
-
-# ==========================================
-# HELPERS JSON NON-BLOQUANTS
-# ==========================================
-
-
-def _json_read_sync(path):
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _text_write_sync(path, payload: str):
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(payload)
-
-
-async def async_json_load(path):
-    return await asyncio.to_thread(_json_read_sync, path)
-
-
-async def async_json_dump(path, data, indent=4, ensure_ascii=False):
-    payload = json.dumps(data, indent=indent, ensure_ascii=ensure_ascii)
-    await asyncio.to_thread(_text_write_sync, path, payload)
-
-
-# ==========================================
-# LOAD / SAVE
-# ==========================================
-
-
-async def load_blocks_async():
-    if cache_mngr.blocks is not None:
-        return cache_mngr.blocks
-
-    path = ADMINS_DIR / "blocks.json"
-    async with get_file_lock(path):
-        if os.path.exists(path):
-            try:
-                cache_mngr.blocks = await async_json_load(path)
-                return cache_mngr.blocks
-            except Exception as e:
-                logger.error(f"❌ [Admin] Fichier blocks.json corrompu ou illisible : {e}")
-                obs.record_error(source="utils", scope="load_blocks", exception=e, cog="utils")
-
-    cache_mngr.blocks = {"global_commands": {}, "blocked_users": {}}
-    return cache_mngr.blocks
-
-
-async def save_blocks_async(data):
-    cache_mngr.blocks = data
-    path = ADMINS_DIR / "blocks.json"
-    async with get_file_lock(path):
-        await async_json_dump(path, data, indent=4, ensure_ascii=False)
-
-
-async def load_configuration_async():
-    path = CONFIG_DIR / "servers_cache.json"
-    async with get_file_lock(path):
-        if os.path.exists(path):
-            try:
-                return await async_json_load(path)
-            except Exception as e:
-                logger.error(f"❌ [Config] Erreur lecture servers_cache.json : {e}")
-                obs.record_error(source="utils", scope="load_configuration", exception=e, cog="utils")
-        return {"servers_info": {}}
-
-
-async def save_configuration_async(data):
-    path = CONFIG_DIR / "servers_cache.json"
-    async with get_file_lock(path):
-        await async_json_dump(path, data, indent=4, ensure_ascii=False)
-
-
-async def load_pseudos_async():
-    path = JOUEURS_DIR / "discord_pseudos.json"
-    async with get_file_lock(path):
-        if os.path.exists(path):
-            try:
-                return await async_json_load(path)
-            except Exception as e:
-                logger.error(f"❌ [Pseudos] Erreur discord_pseudos.json : {e}")
-                obs.record_error(source="utils", scope="load_pseudos", exception=e, cog="utils")
-    return {}
-
-
-async def save_pseudos_async(data):
-    path = JOUEURS_DIR / "discord_pseudos.json"
-    async with get_file_lock(path):
-        await async_json_dump(path, data, indent=4, ensure_ascii=True)
-
-
-async def load_rivals_async():
-    path = JOUEURS_DIR / "rival_radar.json"
-    async with get_file_lock(path):
-        if os.path.exists(path):
-            try:
-                return await async_json_load(path)
-            except Exception as e:
-                logger.error(f"❌ [Radar] Erreur rival_radar.json : {e}")
-                obs.record_error(source="utils", scope="load_rivals", exception=e, cog="utils")
-    return {}
-
-
-async def save_rivals_async(data):
-    path = JOUEURS_DIR / "rival_radar.json"
-    async with get_file_lock(path):
-        await async_json_dump(path, data, indent=4, ensure_ascii=True)
-
-
-async def load_dungeons_async():
-    path = JOUEURS_DIR / "forteresses_sessions.json"
-    async with get_file_lock(path):
-        if os.path.exists(path):
-            try:
-                return await async_json_load(path)
-            except Exception as e:
-                logger.error(f"❌ [Forts] Erreur forteresses_sessions.json : {e}")
-                obs.record_error(source="utils", scope="load_dungeons", exception=e, cog="utils")
-    return {"sessions": {}}
-
-
-async def save_dungeons_async(data):
-    path = JOUEURS_DIR / "forteresses_sessions.json"
-    async with get_file_lock(path):
-        await async_json_dump(path, data, indent=4, ensure_ascii=True)
-
-
 def load_maintenance():
     path = ADMINS_DIR / "maintenance.json"
     if os.path.exists(path):
@@ -1249,9 +703,112 @@ def load_maintenance():
             with open(path, encoding="utf-8") as f:
                 return json.load(f).get("maintenance_mode", False)
         except Exception as e:
-            logger.error(f"❌ [Admin] Impossible de lire maintenance.json : {e}")
-            obs.record_error(source="utils", scope="load_maintenance", exception=e, cog="utils")
+            logger.error(f"❌ Impossible de lire maintenance.json : {e}")
     return False
+
+
+async def load_blocks_async():
+    global BLOCKS_CACHE
+    if BLOCKS_CACHE is not None:
+        return BLOCKS_CACHE
+
+    path = ADMINS_DIR / "blocks.json"
+    async with get_file_lock(path):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    BLOCKS_CACHE = json.load(f)
+                    return BLOCKS_CACHE
+            except Exception as e:
+                logger.error(f"❌ Fichier blocks.json corrompu ou illisible : {e}")
+
+    BLOCKS_CACHE = {"global_commands": {}, "blocked_users": {}}
+    return BLOCKS_CACHE
+
+
+async def save_blocks_async(data):
+    global BLOCKS_CACHE
+    BLOCKS_CACHE = data
+    path = ADMINS_DIR / "blocks.json"
+    async with get_file_lock(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+async def load_configuration_async():
+    path = CONFIG_DIR / "configuration.json"
+    async with get_file_lock(path):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"❌ Erreur configuration.json : {e}")
+        return {"servers_info": {}}
+
+
+async def save_configuration_async(data):
+    path = CONFIG_DIR / "configuration.json"
+    async with get_file_lock(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+
+async def load_pseudos_async():
+    path = JOUEURS_DIR / "discord_pseudos.json"
+    async with get_file_lock(path):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"❌ Erreur discord_pseudos.json : {e}")
+    return {}
+
+
+async def save_pseudos_async(data):
+    path = JOUEURS_DIR / "discord_pseudos.json"
+    async with get_file_lock(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+
+
+async def load_rivals_async():
+    path = JOUEURS_DIR / "rival_radar.json"
+    async with get_file_lock(path):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"❌ Erreur rival_radar.json : {e}")
+    return {}
+
+
+async def save_rivals_async(data):
+    path = JOUEURS_DIR / "rival_radar.json"
+    async with get_file_lock(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+
+
+async def load_dungeons_async():
+    path = JOUEURS_DIR / "forteresses_sessions.json"
+    async with get_file_lock(path):
+        if os.path.exists(path):
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"❌ Erreur forteresses_sessions.json : {e}")
+    return {"sessions": {}}
+
+
+async def save_dungeons_async(data):
+    path = JOUEURS_DIR / "forteresses_sessions.json"
+    async with get_file_lock(path):
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
 
 
 async def load_maintenance_async():
@@ -1259,17 +816,18 @@ async def load_maintenance_async():
     async with get_file_lock(path):
         if os.path.exists(path):
             try:
-                return (await async_json_load(path)).get("maintenance_mode", False)
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f).get("maintenance_mode", False)
             except Exception as e:
-                logger.error(f"❌ [Admin] Erreur maintenance.json : {e}")
-                obs.record_error(source="utils", scope="load_maintenance_async", exception=e, cog="utils")
+                logger.error(f"❌ Erreur maintenance.json : {e}")
     return False
 
 
 async def save_maintenance_async(etat):
     path = ADMINS_DIR / "maintenance.json"
     async with get_file_lock(path):
-        await async_json_dump(path, {"maintenance_mode": etat}, indent=None, ensure_ascii=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"maintenance_mode": etat}, f)
 
 
 async def load_surveillance_async():
@@ -1277,17 +835,18 @@ async def load_surveillance_async():
     async with get_file_lock(path):
         if os.path.exists(path):
             try:
-                data = await async_json_load(path)
-                if "alliances" not in data:
-                    data["alliances"] = {}
-                return data
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                    if "alliances" not in data:
+                        data["alliances"] = {}
+                    return data
             except Exception as e:
-                logger.error(f"❌ [Radar] Erreur surveillance.json : {e}")
-                obs.record_error(source="utils", scope="load_surveillance", exception=e, cog="utils")
+                logger.error(f"❌ Erreur surveillance.json : {e}")
     return {"players": {}, "alliances": {}}
 
 
 async def save_surveillance_async(data):
     path = JOUEURS_DIR / "surveillance.json"
     async with get_file_lock(path):
-        await async_json_dump(path, data, indent=4, ensure_ascii=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
