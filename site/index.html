@@ -197,14 +197,18 @@ function renderBotPayload(payload){
       const stateNames={0:"Wolna",1:"Zajęta",2:"Odnawia się"};
       const body=rows.map(x=>{
         const captured=x.captured_at||x.occupied_at||x.occupation_started_at||x.capturedAt||x.occupiedAt||null;
-        const ends=x.occupation_ends_at||x.occupied_until||x.occupationEndsAt||null;
+        const ends=x.occupation_ends_at||x.occupied_until||x.occupationEndsAt||x.occupation_end||x.end_at||null;
         const available=x.available_at||null;
+        const smallIsle=[1,2,6].includes(Number(x.isle_id));
+        const respawnHours=smallIsle?36:72;
+        const predicted=ends?new Date(Date.parse(ends)+respawnHours*3600000).toISOString():null;
         const startText=captured?fmtTime(captured):"API nie podaje";
         const endText=ends?fmtTime(ends):(available?fmtTime(available):"API nie podaje");
-        const nextText=available?countdown(available):(ends?"Po okupacji + czas odnowienia":"Brak terminu w API");
-        return '<tr><td>'+esc(names[x.isle_id]||("Wyspa "+(x.isle_id??"?")))+'</td><td>'+esc((x.position_x??"?")+":"+(x.position_y??"?"))+'</td><td>'+esc(x.occupier_name||"—")+'</td><td>'+esc(x.occupier_alliance_name||"—")+'</td><td>'+esc(stateNames[x.state]||String(x.state??"—"))+'</td><td>'+esc(startText)+'</td><td>'+esc(endText)+'</td><td><b>'+esc(nextText)+'</b></td></tr>';
+        const nextText=available?countdown(available):(predicted?countdown(predicted):"Brak terminu w API");
+        const respawnText=available?"Termin z API":(predicted?(smallIsle?"Mała: +36 h":"Duża: +72 h"):"Brak danych o końcu okupacji");
+        return '<tr><td>'+esc(names[x.isle_id]||("Wyspa "+(x.isle_id??"?")))+'</td><td>'+esc((x.position_x??"?")+":"+(x.position_y??"?"))+'</td><td>'+esc(x.occupier_name||"—")+'</td><td>'+esc(x.occupier_alliance_name||"—")+'</td><td>'+esc(stateNames[x.state]||String(x.state??"—"))+'</td><td>'+esc(startText)+'</td><td>'+esc(endText)+'</td><td><b>'+esc(nextText)+'</b><small style="display:block;opacity:.75">'+esc(respawnText)+'</small></td></tr>';
       }).join("");
-      return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono wysp: <b>'+rows.length.toLocaleString("pl-PL")+'</b>. Termin pojawienia się wyspy pochodzi z pola API <code>available_at</code>.</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Typ wyspy</th><th>Współrzędne</th><th>Zajmujący</th><th>Sojusz</th><th>Stan</th><th>Zdobyta</th><th>Koniec okupacji / dostępność</th><th>Ponowne pojawienie</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+      return (meta.length?objectTable(Object.fromEntries(meta)):"")+'<div class="notice">Znaleziono wysp: <b>'+rows.length.toLocaleString("pl-PL")+'</b>. Priorytet ma termin API <code>available_at</code>; jeśli API zwraca koniec okupacji, prognoza wynosi +36 h dla małych i +72 h dla dużych wysp.</div><div class="table-wrap"><table class="data-table"><thead><tr><th>Typ wyspy</th><th>Współrzędne</th><th>Zajmujący</th><th>Sojusz</th><th>Stan</th><th>Zdobyta</th><th>Koniec okupacji / dostępność</th><th>Ponowne pojawienie</th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     if(key==="dungeons"){
       const now=Date.now();
