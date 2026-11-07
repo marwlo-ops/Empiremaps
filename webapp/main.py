@@ -253,6 +253,7 @@ async def bot_tracker_get(path: str, server: str, params: dict | None = None):
 BOT_SUGGEST_CACHE: dict[str, dict] = {}
 BOT_SCAN_STATUS: dict[str, dict] = {}
 BOT_SCAN_TASKS: dict[str, asyncio.Task] = {}
+BOT_DOVE_CACHE: dict[str, dict] = {}
 
 def load_persisted_bot_index(server: str):
     key = server.upper()
@@ -440,6 +441,17 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
         raise HTTPException(400, "Nieprawidłowy serwer.")
     page_limit = max(1, min(int(page_limit), 200))
+    cache_key = server.upper()
+    cached = BOT_DOVE_CACHE.get(cache_key)
+    if cached and time.time() - cached.get("loaded", 0) < 300:
+        all_items = cached["items"]
+        filtered = [x for x in all_items
+                    if (not alliance.strip() or x["alliance"].casefold() == alliance.strip().casefold())
+                    and (not player.strip() or player.strip().casefold() in x["player"].casefold())]
+        filtered.sort(key=lambda item: item["peace_disabled_at"])
+        return {"server": cache_key, "items": filtered, "count": len(filtered),
+                "alliances": cached["alliances"], "scanned_players": cached["scanned_players"],
+                "cached": True, "generated_at": cached["generated_at"]}
     params = {
         "limit": 100, "page": 1, "banFilter": 0,
         "allianceFilter": -1, "protectionFilter": -1,
@@ -473,13 +485,14 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
             page_rows, _ = unpack(payload)
             all_rows.extend(page_rows)
             if page < total_pages:
-                await asyncio.sleep(0.25)
+                await asyncio.sleep(1.2)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(502, f"Nie udało się pobrać listy ochron Dove: {exc}")
     now = datetime.now(timezone.utc)
     items = []
+    all_alliances = set()
     for row in all_rows:
         if not isinstance(row, dict):
             continue
@@ -498,14 +511,20 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
         alliance = row.get("alliance_name") or row.get("alliance") or "Bez sojuszu"
         if isinstance(alliance, dict):
             alliance = alliance.get("name") or "Bez sojuszu"
+        alliance = str(alliance).strip() or "Bez sojuszu"
+        if alliance.casefold() not in ("bez sojuszu", "sans alliance"):
+            all_alliances.add(alliance)
         items.append({
             "player": row.get("player_name") or row.get("name") or "—",
-            "alliance": str(alliance).strip() or "Bez sojuszu",
+            "alliance": alliance,
             "player_id": row.get("player_id") or row.get("id"),
             "peace_disabled_at": end.isoformat(),
             "updated_at": row.get("updated_at"),
             "might": row.get("might_current"),
         })
+    all_alliances = sorted(all_alliances, key=str.casefold)
+    BOT_DOVE_CACHE[cache_key] = {"loaded": time.time(), "items": items,
+        "alliances": all_alliances, "scanned_players": len(all_rows), "generated_at": now.isoformat()}
     if alliance.strip():
         wanted_alliance = alliance.strip().casefold()
         items = [item for item in items if item["alliance"].casefold() == wanted_alliance]
@@ -514,8 +533,9 @@ async def bot_doves(server: str = "E4K_PL1_BETA", page_limit: int = 200, allianc
         items = [item for item in items if wanted_player in item["player"].casefold()]
     items.sort(key=lambda item: item["peace_disabled_at"])
     return {"server": server.upper(), "items": items, "count": len(items),
-            "pages_scanned": total_pages, "pages_available": total_value or total_pages,
-            "scanned_players": len(all_rows), "generated_at": now.isoformat()}
+            "alliances": all_alliances, "pages_scanned": total_pages,
+            "pages_available": total_value or total_pages,
+            "scanned_players": len(all_rows), "cached": False, "generated_at": now.isoformat()}
 
 @app.get("/api/bot/fortresses/meta")
 async def bot_fortress_meta(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
