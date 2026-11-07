@@ -414,8 +414,26 @@ function populateBirdAlliances(names){
   select.innerHTML='<option value="">Wszystkie sojusze</option>'+unique.map(name=>'<option value="'+esc(name)+'">'+esc(name)+'</option>').join("");
   if([...select.options].some(o=>o.value===selected))select.value=selected;
 }
+async function loadBirdAlliances(){
+  const select=$("birdsAlliance");
+  try{
+    let data=await api("/api/bot/doves/alliances?server="+encodeURIComponent($("server").value));
+    let names=data.items||[];
+    if(!data.ready||!names.length){
+      const fallback=await api("/api/bot/suggestions?kind=alliances&server="+encodeURIComponent($("server").value));
+      names=fallback.items||names;
+    }
+    populateBirdAlliances(names);
+    if(!names.length && data.ready===false){
+      $("birdsResult").innerHTML='<div class="notice">Lista sojuszy jest przygotowywana przez indeks serwera. Odśwież za chwilę lub uruchom skan w sekcji Mapa i radar.</div>';
+    }
+  }catch(err){
+    $("birdsResult").innerHTML='<div class="notice warn">Nie udało się pobrać listy sojuszy: '+esc(err.message)+'</div>';
+  }
+}
 async function loadBirds(){
   const btn=$("birdsRefresh"),label=btn.textContent;btn.disabled=true;btn.textContent="Pobieranie…";
+  if($("birdsAlliance").options.length<=1) await loadBirdAlliances();
   $("birdsResult").innerHTML='<div class="notice">Pobieram ochrony Dove. Możesz wybrać cały serwer, sojusz albo konkretnego gracza.</div>';
   try{
     const params=new URLSearchParams({server:$("server").value,alliance:$("birdsAlliance").value,player:$("birdsPlayer").value.trim()});
@@ -425,7 +443,7 @@ async function loadBirds(){
 }
 $("birdsRefresh").onclick=loadBirds;
 $("birdsSort").addEventListener("change",renderBirds);
-document.querySelector('[data-view="ptaki"]')?.addEventListener("click",()=>{if(!birdsRows.length)loadBirds()});
+document.querySelector('[data-view="ptaki"]')?.addEventListener("click",()=>{loadBirdAlliances();if(!birdsRows.length)loadBirds()});
 
 </script>
 <datalist id="suggest-playerName"></datalist>
