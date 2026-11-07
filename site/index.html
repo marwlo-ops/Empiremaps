@@ -415,33 +415,41 @@ function populateBirdAlliances(names){
   if([...select.options].some(o=>o.value===selected))select.value=selected;
 }
 async function loadBirdAlliances(){
-  const select=$("birdsAlliance");
+  const select=$("birdsAlliance"),serverNow=$("server").value;
   try{
-    let data=await api("/api/bot/doves/alliances?server="+encodeURIComponent($("server").value));
-    let names=data.items||[];
-    if(!data.ready||!names.length){
-      const fallback=await api("/api/bot/suggestions?kind=alliances&server="+encodeURIComponent($("server").value));
-      names=fallback.items||names;
+    for(let attempt=0;attempt<24;attempt++){
+      const data=await api("/api/bot/doves/alliances?server="+encodeURIComponent(serverNow));
+      let names=data.items||[];
+      if(!names.length){
+        const fallback=await api("/api/bot/suggestions?kind=alliances&server="+encodeURIComponent(serverNow));
+        names=fallback.items||[];
+      }
+      if(names.length){
+        populateBirdAlliances(names);
+        return;
+      }
+      if(attempt===0)$("birdsResult").innerHTML='<div class="notice">Pobieram listę sojuszy serwera w tle. Możesz już uruchomić sprawdzanie ochron.</div>';
+      await new Promise(resolve=>setTimeout(resolve,5000));
     }
-    populateBirdAlliances(names);
-    if(!names.length && data.ready===false){
-      $("birdsResult").innerHTML='<div class="notice">Lista sojuszy jest przygotowywana przez indeks serwera. Odśwież za chwilę lub uruchom skan w sekcji Mapa i radar.</div>';
-    }
+    if(select.options.length<=1)$("birdsResult").innerHTML='<div class="notice warn">Indeks sojuszy jeszcze się buduje. Lista pojawi się automatycznie po zakończeniu skanu.</div>';
   }catch(err){
     $("birdsResult").innerHTML='<div class="notice warn">Nie udało się pobrać listy sojuszy: '+esc(err.message)+'</div>';
   }
 }
 async function loadBirds(){
   const btn=$("birdsRefresh"),label=btn.textContent;btn.disabled=true;btn.textContent="Skan w tle…";
-  if($("birdsAlliance").options.length<=1) await loadBirdAlliances();
-  $("birdsResult").innerHTML='<div class="notice">Uruchamiam pobieranie ochron Dove w tle. Strona pozostaje responsywna; wyniki pojawią się automatycznie po zakończeniu skanu.</div>';
+  if($("birdsAlliance").options.length<=1) loadBirdAlliances();
+  $("birdsResult").innerHTML='<div class="notice">Pobieram tylko graczy z aktywną ochroną Dove. Wyniki i postęp pojawią się automatycznie.</div>';
   try{
     const params=new URLSearchParams({server:$("server").value,alliance:$("birdsAlliance").value,player:$("birdsPlayer").value.trim()});
     let data=null;
     for(let attempt=0;attempt<120;attempt++){
       data=await api("/api/bot/doves?"+params.toString());
       if(data.ready){populateBirdAlliances(data.alliances||[]);birdsRows=data.items||[];window.birdsScanned=data.scanned_players||0;renderBirds();return;}
-      $("birdsResult").innerHTML='<div class="notice">Skan ochron Dove trwa w tle. Nie musisz trzymać strony zablokowanej — sprawdzam postęp i wyświetlę wyniki automatycznie.</div>';
+      if(data.error){$("birdsResult").innerHTML='<div class="notice warn">Nie udało się pobrać ochron: '+esc(data.error)+'. Odczekaj chwilę i spróbuj ponownie.</div>';return;}
+      const st=data.status||{},done=Number(st.pages_completed||0),total=Number(st.total_pages||0),players=Number(st.players_scanned||0);
+      const progress=total?('Strony: '+done+'/'+total+' • gracze: '+players.toLocaleString("pl-PL")):'Pobieranie pierwszej strony…';
+      $("birdsResult").innerHTML='<div class="notice">Skan ochron Dove trwa w tle. '+esc(progress)+'</div>';
       await new Promise(resolve=>setTimeout(resolve,5000));
     }
     $("birdsResult").innerHTML='<div class="notice warn">Skan nadal trwa. Możesz wrócić później — po zakończeniu wyniki będą dostępne z pamięci podręcznej.</div>';
