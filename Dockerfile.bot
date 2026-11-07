@@ -9,7 +9,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+# Preserve the default configuration shipped in the image; Railway volume is mounted at /app/data.
+RUN mkdir -p /opt/bot-default-data /app/logs/general
+COPY data/ /opt/bot-default-data/
 
-RUN mkdir -p /app/logs/general /app/data /app/data/server_scans /app/data/alliance_scans /app/data/player_details /app/data/events_scans
-
-CMD ["python", "-u", "discord_bot.py"]
+CMD ["sh", "-c", "cp -rn /opt/bot-default-data/. /app/data/ 2>/dev/null || true; mkdir -p /app/data/configs /app/data/joueurs /app/data/serveurs /app/data/admins /app/logs/general; exec python -u discord_bot.py"]
