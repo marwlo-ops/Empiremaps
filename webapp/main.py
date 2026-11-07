@@ -386,23 +386,57 @@ async def bot_storm_meta(server: str = "E4K_PL1_BETA", user: User = Depends(curr
     return {"data": await bot_tracker_get("storms/meta", server), "server": server.upper()}
 
 @app.get("/api/bot/storms/forts")
-async def bot_storm_forts(server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
-    return {"data": await bot_tracker_get("storms/forts", server), "server": server.upper()}
+async def bot_storm_forts(
+    server: str = "E4K_PL1_BETA",
+    page: int = 1,
+    size: int = 500,
+    availability: int = 1,
+    levels: str = "",
+    min_attacks: int = 0,
+    user: User = Depends(current_user),
+):
+    if page < 1 or size < 1 or size > 500 or availability not in (0, 1, 2, 3) or not 0 <= min_attacks <= 10:
+        raise HTTPException(400, "Nieprawidłowe filtry fortów sztormowych.")
+    level_map = {"40":[10], "50":[11], "60":[7,12], "70":[8,13], "80":[9,14]}
+    selected = [item.strip() for item in levels.split(",") if item.strip()]
+    if any(item not in level_map for item in selected):
+        raise HTTPException(400, "Nieprawidłowy poziom fortu.")
+    isle_ids = [i for level in selected for i in level_map[level]] if selected else [7,8,9,10,11,12,13,14]
+    params = {
+        "page": page, "size": size, "minAttacksLeft": min_attacks,
+        "filterByIsleIds": "[" + ",".join(map(str, isle_ids)) + "]",
+        "orderDirection": "desc",
+    }
+    if availability:
+        params["filterByAvailability"] = availability
+    return {"data": await bot_tracker_get("storms/forts", server, params), "server": server.upper(),
+            "filters": {"availability": availability, "levels": selected or ["40","50","60","70","80"], "min_attacks": min_attacks}}
 
 @app.get("/api/bot/storms/isles")
 async def bot_storm_isles(
     server: str = "E4K_PL1_BETA",
     occupier: str = "",
     page: int = 1,
-    size: int = 100,
+    size: int = 500,
+    state: int = 0,
+    resource: int = 0,
     user: User = Depends(current_user),
 ):
-    if page < 1 or size < 1 or size > 500:
-        raise HTTPException(400, "Nieprawidłowy zakres strony lub liczby wyników.")
+    if page < 1 or size < 1 or size > 500 or state not in (0,1,2,3) or resource not in (0,1,2,3):
+        raise HTTPException(400, "Nieprawidłowe filtry wysp sztormowych.")
     params = {"page": page, "size": size}
+    if state:
+        params["filterByState"] = state
     if occupier.strip():
         params["filterByOccupierName"] = occupier.strip()[:80]
-    return {"data": await bot_tracker_get("storms/isles", server, params), "server": server.upper()}
+    payload = await bot_tracker_get("storms/isles", server, params)
+    allowed = {1:[3,6], 2:[1,4], 3:[2,5]}.get(resource)
+    if allowed and isinstance(payload, dict) and isinstance(payload.get("isles"), list):
+        payload = dict(payload)
+        payload["isles"] = [item for item in payload["isles"] if isinstance(item, dict) and item.get("isle_id") in allowed]
+    return {"data": payload, "server": server.upper(),
+            "filters": {"state": state, "resource": resource, "occupier": occupier.strip()}}
+
 
 @app.get("/api/bot/castles/search/{name}")
 async def bot_castle_search(name: str, server: str = "E4K_PL1_BETA", user: User = Depends(current_user)):
