@@ -22,7 +22,6 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
       <button class="active" data-view="overview"><span class="sym">⌂</span>Przegląd</button>
       <button data-view="player"><span class="sym">♟</span>Gracze</button>
       <button data-view="alliance"><span class="sym">♜</span>Sojusze</button>
-      <button data-view="fortress"><span class="sym">⌖</span>Historia fortec</button>
       <button data-view="server"><span class="sym">▦</span>Statystyki serwera</button>
       <button data-view="map"><span class="sym">◈</span>Mapa i radar</button>
       <button data-view="movement-review"><span class="sym">⇄</span>Przegląd ruchów</button>
@@ -30,6 +29,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
       <button data-view="ptaki"><span class="sym">🐦</span>Ptaki</button>
       <button data-view="mapa"><span class="sym">🗺</span>Mapa sojuszy</button>
       <button data-view="events"><span class="sym">◷</span>Wydarzenia</button>
+      <button data-view="print"><span class="sym">▤</span>Drukuj PDF</button>
     </nav></div>
     <div class="side-bottom">EMPIREMAPS WEB 0.1<br>Discord nie jest wymagany do logowania ani korzystania z panelu.<br><br>Nieoficjalny projekt społeczności.</div>
   </aside>
@@ -53,7 +53,7 @@ html,body{width:100%;max-width:100%;overflow-x:hidden}.shell,.main,.content{min-
       </section>
       <section class="view" id="view-player"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Wyszukiwarka graczy</h1><p>Wyszukaj profil gracza w wybranym świecie.</p></div></div><div class="panel"><div class="searchrow"><div class="autocomplete-field"><input class="field" id="playerName" placeholder="Nazwa gracza" autocomplete="off"><div class="suggestion-menu" id="suggest-box-playerName" hidden></div></div><button class="btn primary" id="playerSearch">Szukaj gracza</button></div><div class="result" id="playerResult"></div></div></section>
       <section class="view" id="view-alliance"><div class="welcome"><div><div class="eyebrow">INTELIGENCJA</div><h1>Sojusze</h1><p>Wyszukaj sojusz i sprawdź dostępne informacje.</p></div></div><div class="panel"><div class="searchrow"><div class="autocomplete-field"><input class="field" id="allianceName" placeholder="Nazwa sojuszu" autocomplete="off"><div class="suggestion-menu" id="suggest-box-allianceName" hidden></div></div><button class="btn primary" id="allianceSearch">Szukaj sojuszu</button></div><div class="result" id="allianceResult"></div></div></section>
-      <section class="view" id="view-fortress"><div class="welcome"><div><div class="eyebrow">HISTORIA DZIAŁAŃ</div><h1>Historia fortec</h1><p>Lista zarejestrowanych ataków gracza na fortece.</p></div></div><div class="panel"><div class="searchrow"><input class="field" id="fortressName" placeholder="Nazwa gracza"><button class="btn primary" id="fortressSearch">Pobierz historię</button></div><div class="result" id="fortressResult"></div></div></section>
+      <section class="view" id="view-print"><div class="welcome"><div><div class="eyebrow">RAPORTY</div><h1>Drukuj PDF</h1><p>Wybierz krainy i rodzaje wysp, a następnie przygotuj listę do wydruku.</p></div></div><div class="panel" style="padding:0;overflow:hidden"><iframe title="Konfiguracja raportu PDF" src="https://marwlo-ops.github.io/Empirenew/drukuj.html" style="display:block;width:100%;height:calc(100vh - 220px);min-height:760px;border:0;background:#0b1422" loading="lazy"></iframe></div></section>
       <section class="view" id="view-server"><div class="welcome"><div><div class="eyebrow">ANALITYKA ŚWIATA</div><h1>Statystyki serwera</h1><p>Globalne statystyki wybranego świata gry.</p></div></div><div class="panel"><div class="panel-title"><h2>Podsumowanie świata</h2><button class="btn primary" id="serverSearch">Odśwież dane</button></div><div class="result" id="serverResult"></div></div></section>
       <section class="view" id="view-map"><div class="welcome"><div><div class="eyebrow">TAKTYKA</div><h1>Mapa i radar</h1><p>Wyszukiwanie celów, analiza obiektów i podgląd ruchów serwera.</p></div></div>
         <div class="panel" style="margin-bottom:16px">
@@ -162,7 +162,7 @@ function showApp(){applyDefaultServer();$("authScreen")?.classList.add("hidden")
 async function health(){try{await api("/api/health");$("apiDot").classList.remove("off");$("apiStatus").textContent="Backend działa";}catch{$("apiDot").classList.add("off");$("apiStatus").textContent="Brak połączenia z backendem";}}
 if($("logout"))$("logout").remove();
 showApp();
-const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",fortress:"Historia fortec",server:"Statystyki serwera",map:"Mapa i radar","movement-review":"Przegląd ruchów",ptaki:"Ptaki",mapa:"Mapa sojuszy",events:"Wydarzenia"};
+const names={overview:"Przegląd",player:"Gracze",alliance:"Sojusze",server:"Statystyki serwera",map:"Mapa i radar","movement-review":"Przegląd ruchów",ptaki:"Ptaki",mapa:"Mapa sojuszy",events:"Wydarzenia",print:"Drukuj PDF"};
 function go(view){document.querySelectorAll(".view").forEach(x=>x.classList.remove("active"));$("view-"+view).classList.add("active");document.querySelectorAll("#nav button").forEach(x=>x.classList.toggle("active",x.dataset.view===view));$("crumb").textContent=names[view];$("sidebar").classList.remove("open");if(view==="map")refreshBotScanStatus();if(view==="events")loadCalendar("main")}
 $("nav").onclick=e=>{const b=e.target.closest("button[data-view]");if(b)go(b.dataset.view)};
 document.querySelectorAll("[data-go]").forEach(b=>b.onclick=()=>go(b.dataset.go));
@@ -171,10 +171,9 @@ const server=()=>encodeURIComponent($("server").value);
 function objectTable(obj){if(Array.isArray(obj))return tableFromArray(obj);if(!obj||typeof obj!=="object")return '<div class="notice">'+esc(obj)+'</div>';const rows=Object.entries(obj).filter(([k,v])=>v===null||["string","number","boolean"].includes(typeof v)).slice(0,35);return '<table class="data-table"><tbody>'+rows.map(([k,v])=>'<tr><th>'+esc(k.replaceAll("_"," "))+'</th><td>'+esc(v)+'</td></tr>').join("")+'</tbody></table>'}
 function tableFromArray(arr){if(!arr.length)return '<div class="notice">Brak zarejestrowanych danych.</div>';const keys=[...new Set(arr.slice(0,20).flatMap(o=>Object.keys(o||{})))].slice(0,7);return '<table class="data-table"><thead><tr>'+keys.map(k=>'<th>'+esc(k)+'</th>').join("")+'</tr></thead><tbody>'+arr.slice(0,100).map(o=>'<tr>'+keys.map(k=>'<td>'+esc(typeof o?.[k]==="object"?JSON.stringify(o[k]):o?.[k])+'</td>').join("")+'</tr>').join("")+'</tbody></table>'}
 async function runSearch(btn,result,url){btn.disabled=true;btn.textContent="Pobieranie…";result.innerHTML='<div class="notice">Łączenie z API gry…</div>';try{const data=await api(url);$("trackerDot").classList.remove("off");$("trackerStatus").textContent="API gry: ostatnie zapytanie zakończone powodzeniem";const value=data.data??data.dungeons??data;result.innerHTML=objectTable(value)}catch(err){$("trackerDot").classList.add("off");$("trackerStatus").textContent="API gry: problem z ostatnim zapytaniem";result.innerHTML='<div class="notice warn">'+esc(err.message)+'</div>'}finally{btn.disabled=false;btn.textContent=btn.dataset.label}}
-["playerSearch","allianceSearch","fortressSearch","serverSearch"].forEach(id=>$(id).dataset.label=$(id).textContent);
+["playerSearch","allianceSearch","serverSearch"].forEach(id=>$(id).dataset.label=$(id).textContent);
 $("playerSearch").onclick=()=>{const n=$("playerName").value.trim();if(n)runSearch($("playerSearch"),$("playerResult"),"/api/game/player/"+encodeURIComponent(n)+"?server="+server())};
 $("allianceSearch").onclick=()=>{const n=$("allianceName").value.trim();if(n)runSearch($("allianceSearch"),$("allianceResult"),"/api/game/alliance/"+encodeURIComponent(n)+"?server="+server())};
-$("fortressSearch").onclick=()=>{const n=$("fortressName").value.trim();if(n)runSearch($("fortressSearch"),$("fortressResult"),"/api/game/player/"+encodeURIComponent(n)+"/fortress-history?server="+server())};
 $("serverSearch").onclick=()=>runSearch($("serverSearch"),$("serverResult"),"/api/game/server/statistics?server="+server());
 
 
