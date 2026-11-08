@@ -228,21 +228,31 @@ def bot_headers(server: str):
 
 async def bot_tracker_get(path: str, server: str, params: dict | None = None):
     url = BOT_API_BASE + "/" + path.lstrip("/")
+    safe_params = dict(params or {})
     try:
-        async with httpx.AsyncClient(timeout=25, follow_redirects=True) as client:
-            response = await client.get(url, headers=bot_headers(server), params=params)
+        async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
+            response = await client.get(url, headers=bot_headers(server), params=safe_params)
+        logging.info("GGE Tracker request path=%s server=%s params=%s status=%s bytes=%s",
+                     path, server.upper(), safe_params, response.status_code, len(response.content))
         if response.status_code == 404:
             raise HTTPException(404, "Brak danych dla wybranego serwera lub obiektu.")
         if response.status_code == 429:
             raise HTTPException(429, "API GGE Tracker ograniczyło liczbę zapytań. Spróbuj ponownie za chwilę.")
         if response.status_code >= 400:
-            raise HTTPException(502, f"GGE Tracker zwrócił błąd {response.status_code}.")
-        return response.json()
+            detail = response.text[:300].replace("\\n", " ")
+            logging.error("GGE Tracker error path=%s server=%s status=%s body=%s", path, server.upper(), response.status_code, detail)
+            raise HTTPException(502, f"GGE Tracker zwrócił błąd {response.status_code}: {detail}")
+        try:
+            return response.json()
+        except ValueError as exc:
+            logging.error("GGE Tracker returned invalid JSON path=%s server=%s body=%s", path, server.upper(), response.text[:300])
+            raise HTTPException(502, "GGE Tracker zwrócił nieprawidłowe dane JSON.") from exc
     except HTTPException:
         raise
-    except Exception:
+    except Exception as exc:
+        logging.exception("GGE Tracker connection failure path=%s server=%s: %s", path, server.upper(), exc)
         raise HTTPException(502, "Nie udało się połączyć z API GGE Tracker.")
-
+    
 
 BOT_SUGGEST_CACHE: dict[str, dict] = {}
 BOT_SCAN_STATUS: dict[str, dict] = {}
