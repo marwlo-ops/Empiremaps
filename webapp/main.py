@@ -440,16 +440,15 @@ async def bot_dove_alliances(server: str = "E4K_PL1_BETA", user: User = Depends(
             "message": "Lista sojuszy jest budowana z indeksu serwera."}
 
 async def _load_bot_doves(server: str, page_limit: int, alliance: str, player: str):
-    """Pobiera graczy i lokalnie wybiera aktywną ochronę Dove."""
+    """Aktywne okresy ochrony Dove ze wszystkich sojuszy serwera."""
     if not re.fullmatch(r"[A-Za-z0-9_-]{2,40}", server):
         raise HTTPException(400, "Nieprawidłowy serwer.")
     page_limit = max(1, min(int(page_limit), 200))
     cache_key = server.upper()
-    # Nie zakładamy, że zewnętrzny filtr protectionFilter=1 ma tę samą semantykę
-    # na każdym serwerze. Pobieramy wszystkie statusy ochrony i filtrujemy po dacie.
+    # Pobieramy wyłącznie graczy z aktywną ochroną Dove, a nie cały serwer.
     params = {
         "limit": 100, "page": 1, "banFilter": 0,
-        "allianceFilter": -1, "protectionFilter": -1,
+        "allianceFilter": -1, "protectionFilter": 1,
         "inactiveFilter": -1, "kingdomFilter": 999,
         "orderBy": "might_current", "orderType": "DESC",
     }
@@ -458,10 +457,10 @@ async def _load_bot_doves(server: str, page_limit: int, alliance: str, player: s
             return payload, {}
         if not isinstance(payload, dict):
             return [], {}
-        rows = payload.get("players", payload.get("items", payload.get("data", payload.get("results", []))))
+        rows = payload.get("players", payload.get("items", payload.get("data", [])))
         if isinstance(rows, dict):
-            rows = rows.get("players", rows.get("items", rows.get("data", rows.get("results", []))))
-        meta = payload.get("pagination", payload.get("meta", payload))
+            rows = rows.get("players", rows.get("items", rows.get("data", [])))
+        meta = payload.get("pagination", payload)
         return (rows if isinstance(rows, list) else []), (meta if isinstance(meta, dict) else {})
     try:
         async def fetch_dove_page(page):
@@ -475,43 +474,27 @@ async def _load_bot_doves(server: str, page_limit: int, alliance: str, player: s
                 except HTTPException as exc:
                     if exc.status_code != 429 or attempt == 3:
                         raise
-            raise RuntimeError("Nie udało się pobrać strony listy graczy.")
+            raise RuntimeError("Nie udało się pobrać strony ochron Dove.")
         first = await fetch_dove_page(1)
         rows, meta = unpack(first)
-        total_value = None
-        total_count = None
-        for key in ("total_pages", "totalPages", "last_page", "lastPage", "pages"):
-            if meta.get(key) is not None:
-                total_value = meta.get(key)
-                break
-        for key in ("total_items_count", "total", "totalItemsCount", "total_count", "totalCount"):
-            if isinstance(meta.get(key), (int, float)):
-                total_count = int(meta[key])
-                break
-        if total_value is None and total_count is not None:
-            total_value = max(1, (total_count + 99) // 100)
-        total_pages = max(1, min(int(total_value), page_limit)) if total_value is not None else None
+        total_value = meta.get("total_pages", meta.get("totalPages", meta.get("last_page")))
+        if total_value is None:
+            total_count = meta.get("total_items_count", meta.get("total", meta.get("totalItemsCount")))
+            if total_count is not None:
+                total_value = max(1, (int(total_count) + 99) // 100)
+        total_pages = max(1, min(int(total_value or 1), page_limit))
         all_rows = list(rows)
         status = BOT_DOVE_STATUS.setdefault(cache_key, {})
         status.update({"running": True, "pages_completed": 1, "total_pages": total_pages,
                        "players_scanned": len(all_rows), "error": None})
-        page = 2
-        while page <= page_limit and (total_pages is None or page <= total_pages):
+        for page in range(2, total_pages + 1):
             payload = await fetch_dove_page(page)
             page_rows, _ = unpack(payload)
-            if not page_rows:
-                break
             all_rows.extend(page_rows)
-            if total_pages is None and len(page_rows) < 100:
-                total_pages = page
-            status.update({"running": True, "pages_completed": page, "total_pages": total_pages,
-                           "players_scanned": len(all_rows), "error": None})
-            page += 1
-            await asyncio.sleep(0.25)
-        if total_pages is None:
-            total_pages = min(page_limit, max(1, page - 1))
-        status.update({"running": True, "pages_completed": min(page - 1, total_pages),
-                       "total_pages": total_pages, "players_scanned": len(all_rows), "error": None})
+            status.update({"pages_completed": page, "total_pages": total_pages,
+                           "players_scanned": len(all_rows)})
+            if page < total_pages:
+                await asyncio.sleep(0.25)
     except HTTPException:
         raise
     except Exception as exc:
