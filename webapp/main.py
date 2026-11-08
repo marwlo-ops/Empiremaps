@@ -1722,5 +1722,15 @@ def features(user: User = Depends(current_user)):
         "note": "Funkcje zewnętrzne wymagają dostępności GGE Tracker i prawidłowego serwera."
     }
 
+@app.middleware("http")
+async def prevent_stale_app_shell(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/" or path.endswith(".html") or path == "/sw.js":
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 if SITE.exists():
     app.mount("/", StaticFiles(directory=str(SITE), html=True), name="site")
