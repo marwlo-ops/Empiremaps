@@ -719,6 +719,50 @@ async def bot_storm_forts(
         await asyncio.sleep(0.25)
 
     forts = list(merged.values())
+
+    # Sortuj według najbliższego ponownego udostępnienia.
+    # Jeśli źródło nie zwraca available_at, wylicz termin wyłącznie
+    # z jawnego czasu ostatniego ataku + 24 godziny.
+    def parse_fort_time(value):
+        if not value:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return None
+
+    attack_time_fields = (
+        "last_attack_at", "last_attacked_at", "last_attack_time",
+        "last_battle_at", "last_burned_at", "burned_at", "attacked_at",
+    )
+    for fort in forts:
+        available_value = (
+            fort.get("available_at") or fort.get("unlock_at") or
+            fort.get("next_available_at") or fort.get("respawn_at")
+        )
+        available_dt = parse_fort_time(available_value)
+        if available_dt is None:
+            for field in attack_time_fields:
+                attacked_dt = parse_fort_time(fort.get(field))
+                if attacked_dt is not None:
+                    available_dt = attacked_dt + timedelta(hours=24)
+                    fort["availability_rule"] = "last_attack_plus_24h"
+                    break
+        if available_dt is not None:
+            fort["next_available_at"] = available_dt.isoformat().replace("+00:00", "Z")
+            fort["available_in_seconds"] = max(0, int((available_dt - datetime.now(timezone.utc)).total_seconds()))
+        else:
+            fort["next_available_at"] = None
+            fort["available_in_seconds"] = None
+
+    # Najbliższy termin na początku; rekordy bez wiarygodnej daty na końcu.
+    forts.sort(key=lambda fort: (
+        fort.get("available_in_seconds") is None,
+        fort.get("available_in_seconds") if fort.get("available_in_seconds") is not None else float("inf"),
+    ))
     if isinstance(first_payload, dict):
         payload = dict(first_payload)
         payload["forts"] = forts
