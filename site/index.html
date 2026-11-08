@@ -534,21 +534,29 @@ function populateBirdAlliances(names){
 async function loadBirdAlliances(){
   const select=$("birdsAlliance"),serverNow=$("server").value;
   try{
+    // Jawnie uruchom skan zamiast liczyć na ciche uruchomienie z endpointu listy.
+    await api("/api/bot/scan/"+encodeURIComponent(serverNow),{method:"POST"});
     for(let attempt=0;attempt<24;attempt++){
-      const data=await api("/api/bot/doves/alliances?server="+encodeURIComponent(serverNow));
-      let names=data.items||[];
-      if(!names.length){
-        const fallback=await api("/api/bot/suggestions?kind=alliances&server="+encodeURIComponent(serverNow));
-        names=fallback.items||[];
+      const status=await api("/api/bot/scan/status?server="+encodeURIComponent(serverNow));
+      const scan=status.scan||{};
+      if(status.cached){
+        const data=await api("/api/bot/doves/alliances?server="+encodeURIComponent(serverNow));
+        const names=data.items||[];
+        if(names.length){populateBirdAlliances(names);return;}
       }
-      if(names.length){
-        populateBirdAlliances(names);
-        return;
+      if(scan.error){
+        throw new Error("Skan sojuszy nie powiódł się: "+scan.error);
       }
-      if(attempt===0)$("birdsResult").innerHTML='<div class="notice">Pobieram listę sojuszy serwera w tle. Możesz już uruchomić sprawdzanie ochron.</div>';
+      const done=Number(scan.pages_completed||0),total=Number(scan.total_pages||0);
+      const players=Number(scan.players_found||0),alliances=Number(scan.alliances_found||0);
+      const progress=total?("Strony "+done+"/"+total+" · gracze "+players+" · sojusze "+alliances):"Uruchamianie skanu serwera…";
+      $("birdsResult").innerHTML='<div class="notice">Pobieram listę sojuszy PL1. '+esc(progress)+'</div>';
       await new Promise(resolve=>setTimeout(resolve,5000));
     }
-    if(select.options.length<=1)$("birdsResult").innerHTML='<div class="notice warn">Indeks sojuszy jeszcze się buduje. Lista pojawi się automatycznie po zakończeniu skanu.</div>';
+    const finalStatus=await api("/api/bot/scan/status?server="+encodeURIComponent(serverNow));
+    const finalScan=finalStatus.scan||{};
+    if(finalScan.error) throw new Error(finalScan.error);
+    if(select.options.length<=1) $("birdsResult").innerHTML='<div class="notice warn">Skan listy sojuszy nadal trwa. Gracze: '+Number(finalScan.players_found||0)+' · strony: '+Number(finalScan.pages_completed||0)+'/'+Number(finalScan.total_pages||0)+'. Spróbuj odświeżyć listę za chwilę.</div>';
   }catch(err){
     $("birdsResult").innerHTML='<div class="notice warn">Nie udało się pobrać listy sojuszy: '+esc(err.message)+'</div>';
   }
